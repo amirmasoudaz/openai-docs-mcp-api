@@ -1,0 +1,32 @@
+services:
+  docs-api:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      DB_PATH: /data/docs.sqlite3
+      MD_EXPORT_ROOT: /data/openai_docs_split_rebuilt
+      RAW_DIR: /data/raw_data
+      SITEMAP_PATH: /data/sitemap.xml
+    volumes:
+      - ./data:/data
+
+  docs-mcp:
+    build: .
+    restart: unless-stopped
+    command: ["python", "scripts/run_mcp.py", "--sse"]
+    ports:
+      - "8001:8001"
+    env_file:
+      - .env
+    environment:
+      DB_PATH: /data/docs.sqlite3
+      MD_EXPORT_ROOT: /data/openai_docs_split_rebuilt
+      RAW_DIR: /data/raw_data
+      MCP_HOST: "0.0.0.0"
+      MCP_PORT: "8001"
+    volumes:
+      - ./data:/data

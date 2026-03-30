@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "openai-docs": {
+      "command": "${workspaceFolder}/.venv/bin/python",
+      "args": ["${workspaceFolder}/scripts/run_mcp.py"],
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/src",
+        "DB_PATH": "${workspaceFolder}/data/docs.sqlite3",
+        "MD_EXPORT_ROOT": "${workspaceFolder}/data/openai_docs_split_rebuilt",
+        "RAW_DIR": "${workspaceFolder}/data/raw_data"
+      }
+    }
+  }
+}

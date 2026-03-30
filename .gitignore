@@ -1,0 +1,19 @@
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+.env
+.env.local
+*.sqlite3
+data/
+
+# Local Cursor MCP config (often has absolute paths); use .cursor/mcp.json.example
+.cursor/mcp.json
+
+*.egg-info/
+dist/
+build/
+.DS_Store
+.idea/
+
