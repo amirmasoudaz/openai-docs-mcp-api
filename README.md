@@ -1,8 +1,60 @@
 # openai-docs-scraper
 
-Scrape `https://platform.openai.com/docs/sitemap.xml`, extract each page's content (prefer markdown when available), generate a *very short* per-page summary + embedding, and provide local search over the corpus.
+Agent-ready local retrieval system for the OpenAI Platform docs.
+
+This project captures the OpenAI docs into a deterministic local snapshot, normalizes pages into canonical Markdown, stores them in SQLite, indexes them with FTS5, optionally adds summaries and embeddings, and serves the corpus through CLI, HTTP API, and MCP tools for coding agents.
+
+It is intentionally more than a scraper:
+
+- **Acquisition:** sitemap discovery plus browser-backed page capture into a raw JSON cache.
+- **Normalization:** HTML extraction, markdown conversion, chunking, and canonical path mapping.
+- **Storage and indexing:** SQLite tables for pages and chunks with trigger-synced FTS5 indexes.
+- **Semantic processing:** optional page summaries and embeddings for vector search.
+- **Serving:** CLI, FastAPI endpoints, markdown file export, and MCP tools.
+- **Agent workflows:** exact file reads, navigation index access, and local-grounded retrieval for assistants.
 
 **Full operations guide** (pipelines, API/MCP, Docker, updating data, GitHub publishing): [docs/PROJECT_GUIDE.md](docs/PROJECT_GUIDE.md).
+
+## Why this exists
+
+Browsing live docs is fine for humans. It is weaker for local workflows that need deterministic retrieval, snapshot-based grounding, file-level export, or agent-compatible access paths.
+
+This repository is built for those cases:
+
+- local documentation search without forcing vector infrastructure everywhere
+- reproducible snapshots for experiments, tooling, and evaluation
+- canonical Markdown exports that agents and humans can read directly
+- MCP-native doc access inside editor and assistant workflows
+
+## System shape
+
+```text
+sitemap -> raw page cache -> extraction + chunking -> SQLite + FTS5
+                                      -> summaries + embeddings (optional)
+                                      -> split Markdown export
+                                      -> CLI / API / MCP
+```
+
+## What is strong about the design
+
+- **Dual retrieval modes:** cheap lexical retrieval with FTS5, plus optional vector search when semantic routing helps.
+- **Page and chunk views:** page summaries help routing; chunk bodies preserve retrieval precision.
+- **Canonical Markdown tree:** URLs map to stable markdown paths, which makes exact file retrieval and export practical.
+- **Safe local file serving:** exported docs and cached source files are read under configured roots only.
+- **Multiple interfaces:** the same corpus is usable through scripts, FastAPI, Docker, and MCP.
+
+## Current limits
+
+- **Source-specific today:** the pipeline is strongest for OpenAI docs and would need abstraction to become a general docs platform.
+- **Snapshot-oriented:** refresh is solid, but incremental diffing and stale-vector invalidation are still future work.
+- **Scraping is brittle by nature:** HTML structure, rate limiting, or auth changes upstream can break acquisition.
+
+## High-value next steps
+
+- Retrieval evaluation with labeled queries, recall@k, and MRR across FTS, vector, and hybrid modes.
+- Incremental sync with content diffing, changed-section detection, and selective re-embedding.
+- Ranking improvements that combine lexical score, vector similarity, and structural boosts.
+- Source abstraction so the same pipeline can support SDK docs, product docs, and internal documentation sites.
 
 ## Installation
 
