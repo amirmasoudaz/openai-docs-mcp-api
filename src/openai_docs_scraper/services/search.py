@@ -9,7 +9,7 @@ from typing import Literal, Optional
 from ..book_export import rel_md_path_from_url
 from ..db import connect, init_db
 from ..openai_ops import OpenAIModels, embed_texts
-from ..ranking import RankingCandidate, rank_candidates
+from ..ranking import RankingCandidate, normalize_query_text, rank_candidates
 from ..search import fts_match_query, vector_search_chunks, vector_search_pages
 
 
@@ -211,13 +211,14 @@ def query(
     if embedding_model is None:
         embedding_model = OpenAIModels().embedding_model
 
+    normalized_q = normalize_query_text(q)
     db_path = Path(db_path)
     con = connect(db_path)
     init_db(con)
     candidate_limit = max(k * 5, 20)
 
     if target == "pages" and no_embed:
-        terms = [t for t in q.strip().split() if t]
+        terms = [t for t in normalized_q.strip().split() if t]
         if not terms:
             con.close()
             return []
@@ -244,7 +245,7 @@ def query(
             for r in rows
         ]
         ranked = _merge_for_ranking(
-            query_text=q,
+            query_text=normalized_q,
             vector_hits=[],
             lexical_hits=hits,
             k=k,
@@ -255,7 +256,7 @@ def query(
 
     if no_embed:
         # FTS-only search
-        match_q = fts_match_query(q)
+        match_q = fts_match_query(normalized_q)
         if not match_q:
             con.close()
             return []
@@ -266,7 +267,7 @@ def query(
             group_pages=group_pages,
         )
         ranked = _merge_for_ranking(
-            query_text=q,
+            query_text=normalized_q,
             vector_hits=[],
             lexical_hits=lexical_hits,
             k=k,
@@ -276,11 +277,11 @@ def query(
         return ranked
 
     # Vector search
-    vectors = embed_texts(texts=[q], model=embedding_model)
+    vectors = embed_texts(texts=[normalized_q], model=embedding_model)
     qvec = vectors[0]
     lexical_hits: list[SearchHit] = []
     if fts:
-        match_q = fts_match_query(q)
+        match_q = fts_match_query(normalized_q)
         if match_q:
             lexical_hits = _fts_chunk_hits(
                 con,
@@ -308,7 +309,7 @@ def query(
             for h in hits
         ]
         result = _merge_for_ranking(
-            query_text=q,
+            query_text=normalized_q,
             vector_hits=vector_hits,
             lexical_hits=lexical_hits,
             k=k,
@@ -350,7 +351,7 @@ def query(
                 for h in hits
             ]
         result = _merge_for_ranking(
-            query_text=q,
+            query_text=normalized_q,
             vector_hits=vector_hits,
             lexical_hits=lexical_hits,
             k=k,

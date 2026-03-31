@@ -6,6 +6,7 @@ import re
 import numpy as np
 
 from .embeddings import normalize_rows, normalize_vec, unpack_f32
+from .ranking import STOPWORDS, normalize_query_text
 
 
 @dataclass(frozen=True)
@@ -31,7 +32,11 @@ class PageHit:
 
 
 def fts_match_query(text: str) -> str:
-    tokens = re.findall(r"[A-Za-z0-9]+", (text or "").lower())
+    normalized = normalize_query_text(text)
+    tokens = re.findall(r"[A-Za-z0-9]+", normalized.lower())
+    filtered = [token for token in tokens if token not in STOPWORDS]
+    if filtered:
+        tokens = filtered
     return " OR ".join(f'"{token}"' for token in tokens)
 
 

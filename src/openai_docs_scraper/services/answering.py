@@ -7,10 +7,12 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+import re
 from typing import Literal, Optional
 
 from ..db import connect, init_db
 from ..openai_ops import OpenAIModels, answer_with_citations
+from ..ranking import STOPWORDS
 from .config import get_settings
 from .search import query
 
@@ -35,6 +37,7 @@ class AnswerCitation:
     index: int
     url: str
     title: Optional[str]
+    summary: Optional[str]
     md_relpath: str
     export_abs_path: Optional[str]
     export_file_exists: bool
@@ -111,6 +114,53 @@ def _make_export_path(md_relpath: str) -> tuple[Optional[str], bool]:
     return str(path), path.is_file()
 
 
+def _query_terms(question: str) -> list[str]:
+    tokens = re.findall(r"[a-z0-9]+", (question or "").lower())
+    filtered = [token for token in tokens if token not in STOPWORDS]
+    return filtered or tokens
+
+
+def _best_snippet(question: str, text: str, *, max_sentences: int = 2, max_chars: int = 360) -> str:
+    cleaned = " ".join((text or "").split())
+    if not cleaned:
+        return ""
+
+    query_terms = set(_query_terms(question))
+    sentences = [
+        sentence.strip()
+        for sentence in re.split(r"(?<=[.!?])\s+", cleaned)
+        if sentence.strip()
+    ]
+    if not sentences:
+        return cleaned[:max_chars].rstrip()
+
+    scored: list[tuple[float, int, str]] = []
+    for index, sentence in enumerate(sentences):
+        sentence_terms = set(re.findall(r"[a-z0-9]+", sentence.lower()))
+        overlap = len(query_terms & sentence_terms)
+        starts_with_heading = 1.0 if sentence.endswith(":") or len(sentence.split()) <= 8 else 0.0
+        score = float(overlap) + starts_with_heading
+        scored.append((score, index, sentence))
+
+    scored.sort(key=lambda item: (-item[0], item[1]))
+    best = sorted(scored[:max_sentences], key=lambda item: item[1])
+    snippet = " ".join(sentence for _, _, sentence in best).strip()
+    if len(snippet) <= max_chars:
+        return snippet
+    return snippet[: max_chars - 1].rstrip() + "…"
+
+
+def _clean_snippet(snippet: str, title: str | None) -> str:
+    cleaned = snippet.strip()
+    if title:
+        title_prefix = title.strip()
+        if cleaned.lower().startswith(title_prefix.lower() + " "):
+            cleaned = cleaned[len(title_prefix) + 1 :].lstrip()
+        elif cleaned.lower() == title_prefix.lower():
+            cleaned = ""
+    return cleaned
+
+
 def _extractive_answer(question: str, citations: list[AnswerCitation]) -> str:
     if not citations:
         return (
@@ -119,11 +169,32 @@ def _extractive_answer(question: str, citations: list[AnswerCitation]) -> str:
         )
 
     lead = "Based on the local snapshot, "
+    primary = citations[0]
+    if primary.summary:
+        primary_summary = _clean_snippet(" ".join(primary.summary.split()), primary.title)
+        if primary_summary:
+            return f"{lead}{primary_summary} [1]"
+
     parts: list[str] = []
-    for citation in citations[:2]:
-        snippet = " ".join(citation.snippet.split())
+    strongest_score = citations[0].score
+    for index, citation in enumerate(citations[:2]):
+        if index > 0 and citation.score < strongest_score * 0.9:
+            continue
+        if index == 0 and citation.summary:
+            snippet = " ".join(citation.summary.split())
+        else:
+            snippet = _best_snippet(question, citation.snippet or "")
+        snippet = _clean_snippet(snippet, citation.title)
+        if not snippet:
+            continue
         snippet = snippet.rstrip(".")
         parts.append(f"{snippet} [{citation.index}]")
+
+    if not parts:
+        return (
+            "I found relevant documentation, but I could not extract a concise answer span "
+            "from the current citations."
+        )
 
     answer = lead + " ".join(parts)
     if question.strip().endswith("?"):
@@ -207,6 +278,7 @@ def answer_question(
                 index=index,
                 url=hit.url,
                 title=hit.title,
+                summary=hit.summary,
                 md_relpath=hit.md_relpath,
                 export_abs_path=export_abs_path,
                 export_file_exists=export_file_exists,

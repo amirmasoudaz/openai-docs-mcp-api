@@ -4,6 +4,61 @@ from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 import re
 
+QUERY_PHRASE_ALIASES: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"\bresponse(?:s)? api\b", re.IGNORECASE), "responses api"),
+    (re.compile(r"\bchat completion(?:s)? api\b", re.IGNORECASE), "chat completions api"),
+    (re.compile(r"\bassistant(?:s)? api\b", re.IGNORECASE), "assistants api"),
+)
+
+STOPWORDS = {
+    "a",
+    "an",
+    "and",
+    "are",
+    "as",
+    "at",
+    "be",
+    "by",
+    "can",
+    "could",
+    "do",
+    "does",
+    "for",
+    "from",
+    "how",
+    "i",
+    "in",
+    "is",
+    "it",
+    "me",
+    "of",
+    "on",
+    "or",
+    "should",
+    "tell",
+    "that",
+    "the",
+    "this",
+    "to",
+    "was",
+    "what",
+    "when",
+    "where",
+    "which",
+    "who",
+    "why",
+    "with",
+    "work",
+    "works",
+}
+
+
+def normalize_query_text(text: str) -> str:
+    normalized = text or ""
+    for pattern, replacement in QUERY_PHRASE_ALIASES:
+        normalized = pattern.sub(replacement, normalized)
+    return normalized
+
 
 @dataclass
 class RankingCandidate:
@@ -19,8 +74,12 @@ class RankingCandidate:
     score_details: dict[str, float] = field(default_factory=dict)
 
 
-def _tokens(text: str) -> list[str]:
-    return re.findall(r"[a-z0-9]+", (text or "").lower())
+def _tokens(text: str, *, drop_stopwords: bool = True) -> list[str]:
+    tokens = re.findall(r"[a-z0-9]+", (text or "").lower())
+    if not drop_stopwords:
+        return tokens
+    filtered = [token for token in tokens if token not in STOPWORDS]
+    return filtered or tokens
 
 
 def _term_ratio(query_tokens: list[str], text: str) -> float:
@@ -55,13 +114,36 @@ def _normalize(values: list[float | None], *, invert: bool = False) -> list[floa
     return out
 
 
+def _phrase(text: str) -> str:
+    tokens = _tokens(text)
+    return " ".join(tokens)
+
+
+def _phrase_hit(query_phrase: str, text: str) -> float:
+    if not query_phrase:
+        return 0.0
+    haystack = " ".join(_tokens(text, drop_stopwords=False))
+    return 1.0 if query_phrase in haystack else 0.0
+
+
+def _is_explanatory_query(query: str) -> bool:
+    lowered = (query or "").lower()
+    return any(
+        marker in lowered
+        for marker in ("how ", "what ", "why ", "when ", "overview", "explain", "works", "work?")
+    )
+
+
 def rank_candidates(
     query: str,
     candidates: list[RankingCandidate],
     *,
     limit: int,
 ) -> list[RankingCandidate]:
-    query_tokens = _tokens(query)
+    normalized_query = normalize_query_text(query)
+    query_tokens = _tokens(normalized_query)
+    query_phrase = _phrase(normalized_query)
+    explanatory_query = _is_explanatory_query(normalized_query)
     lexical_norms = _normalize([candidate.lexical_raw for candidate in candidates], invert=True)
     vector_norms = _normalize([candidate.vector_raw for candidate in candidates], invert=False)
 
@@ -70,6 +152,13 @@ def rank_candidates(
         body_ratio = _term_ratio(query_tokens, " ".join(filter(None, [candidate.chunk_text, candidate.summary])))
         title_ratio = _term_ratio(query_tokens, candidate.title or "")
         path_ratio = _term_ratio(query_tokens, candidate.md_relpath)
+        body_phrase = _phrase_hit(query_phrase, " ".join(filter(None, [candidate.chunk_text, candidate.summary])))
+        title_phrase = _phrase_hit(query_phrase, candidate.title or "")
+        path_phrase = _phrase_hit(query_phrase, candidate.md_relpath)
+        section = PurePosixPath(candidate.md_relpath).parts[0] if candidate.md_relpath else ""
+        guide_boost = 1.0 if explanatory_query and section == "guides" else 0.0
+        preview_text = " ".join(filter(None, [candidate.title, candidate.summary, candidate.chunk_text[:200]])).lower()
+        deprecated_penalty = 1.0 if "deprecated" in preview_text else 0.0
         lexical_match_quality = max(body_ratio, title_ratio, path_ratio)
         effective_lexical = lexical_norm * lexical_match_quality
 
@@ -83,6 +172,11 @@ def rank_candidates(
                 + 0.12 * body_ratio
                 + 0.07 * title_ratio
                 + 0.02 * path_ratio
+                + 0.07 * title_phrase
+                + 0.03 * path_phrase
+                + 0.02 * body_phrase
+                + 0.08 * guide_boost
+                - 0.12 * deprecated_penalty
                 + 0.01 * depth_prior
             )
         elif candidate.vector_raw is not None:
@@ -91,15 +185,25 @@ def rank_candidates(
                 + 0.18 * body_ratio
                 + 0.07 * title_ratio
                 + 0.02 * path_ratio
+                + 0.07 * title_phrase
+                + 0.03 * path_phrase
+                + 0.02 * body_phrase
+                + 0.08 * guide_boost
+                - 0.12 * deprecated_penalty
                 + 0.01 * depth_prior
             )
         else:
             total = (
-                0.72 * effective_lexical
-                + 0.18 * body_ratio
-                + 0.07 * title_ratio
-                + 0.02 * path_ratio
-                + 0.01 * depth_prior
+                0.35 * effective_lexical
+                + 0.20 * body_ratio
+                + 0.20 * title_ratio
+                + 0.10 * path_ratio
+                + 0.10 * title_phrase
+                + 0.04 * path_phrase
+                + 0.005 * body_phrase
+                + 0.08 * guide_boost
+                - 0.12 * deprecated_penalty
+                + 0.005 * depth_prior
             )
 
         candidate.score = round(total, 6)
@@ -112,6 +216,11 @@ def rank_candidates(
             "body_term_ratio": round(body_ratio, 6),
             "title_term_ratio": round(title_ratio, 6),
             "path_term_ratio": round(path_ratio, 6),
+            "body_phrase_hit": round(body_phrase, 6),
+            "title_phrase_hit": round(title_phrase, 6),
+            "path_phrase_hit": round(path_phrase, 6),
+            "guide_boost": round(guide_boost, 6),
+            "deprecated_penalty": round(deprecated_penalty, 6),
             "path_depth_prior": round(depth_prior, 6),
             "total": round(total, 6),
         }

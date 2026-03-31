@@ -71,9 +71,65 @@ def test_answer_service_returns_citations_and_freshness(tmp_path: Path) -> None:
     assert result.citations
     assert result.citations[0].url == page_url
     assert result.citations[0].md_relpath == "guides/function-calling.md"
+    assert "function calling lets models decide when to call tools" in result.answer.lower()
     assert result.freshness.newest_last_seen_at is not None
     assert result.freshness.stale_summary_count == 0
     assert result.synthesis_mode == "extractive"
+
+
+def test_answer_service_prefers_direct_guide_over_incidental_mentions(tmp_path: Path) -> None:
+    raw_dir = tmp_path / "raw"
+    raw_dir.mkdir()
+    db_path = tmp_path / "docs.sqlite3"
+
+    _write_cached_page(
+        raw_dir,
+        "reasoning-best-practices",
+        url="https://platform.openai.com/docs/guides/reasoning-best-practices",
+        title="Reasoning Best Practices",
+        raw_html=_make_html(
+            "Reasoning Best Practices",
+            [
+                "This page describes reasoning models used at work and includes one incidental mention of function calling.",
+                "Teams may use function calling to connect models to calendars and email workflows.",
+                "The focus is model-selection and operational guidance rather than tool-calling mechanics.",
+                "One more paragraph keeps the page long enough to pass the ingest threshold.",
+            ],
+        ),
+    )
+    _write_cached_page(
+        raw_dir,
+        "function-calling",
+        url="https://platform.openai.com/docs/guides/function-calling",
+        title="Function Calling",
+        raw_html=_make_html(
+            "Function Calling",
+            [
+                "Function calling lets models decide when to call tools and return structured arguments.",
+                "This guide explains the request, tool call, and tool output loop in detail.",
+                "Applications execute the tool, send the tool output back, and receive a final model response.",
+                "One more paragraph keeps the page long enough to pass the ingest threshold.",
+            ],
+        ),
+    )
+
+    con = connect(db_path)
+    init_db(con)
+    ingest_cached_pages(con=con, raw_dir=raw_dir, force=False)
+    con.close()
+
+    result = answer_question(
+        db_path=db_path,
+        question="How does function calling work?",
+        k=4,
+        citations_limit=2,
+        no_embed=True,
+        synthesis_mode="extractive",
+    )
+
+    assert result.citations[0].url == "https://platform.openai.com/docs/guides/function-calling"
+    assert "function calling lets models decide when to call tools" in result.answer.lower()
+    assert "reasoning best practices" not in result.answer.lower()
 
 
 def test_answer_service_warns_when_cited_summary_and_embedding_are_stale(tmp_path: Path) -> None:
