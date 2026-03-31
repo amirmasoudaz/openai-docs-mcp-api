@@ -1,4 +1,4 @@
-"""Service layer for openai-docs-scraper."""
+"""Service layer for the LLM Provider Docs Ledger."""
 
 from __future__ import annotations
 

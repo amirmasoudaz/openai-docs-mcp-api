@@ -1,4 +1,4 @@
-"""FastAPI application for openai-docs-scraper."""
+"""FastAPI application for the LLM Provider Docs Ledger."""
 
 from .main import app
 

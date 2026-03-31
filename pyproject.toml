@@ -1,7 +1,7 @@
 [project]
-name = "openai-docs-scraper"
+name = "llm-provider-docs-ledger"
 version = "0.1.0"
-description = "Agent-ready local retrieval system for OpenAI platform docs with SQLite, FTS5, FastAPI, and MCP."
+description = "Agent-ready local retrieval and snapshot system for LLM provider API docs with SQLite, FTS5, FastAPI, and MCP."
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.11"

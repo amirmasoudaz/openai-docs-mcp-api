@@ -1,4 +1,4 @@
-# Architecture
+# LLM Provider Docs Ledger Architecture
 
 This repo is a local-first documentation retrieval system with four main layers:
 

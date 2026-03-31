@@ -21,8 +21,8 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="OpenAI Docs Scraper API",
-    description="REST API for scraping, ingesting, summarizing, embedding, and searching OpenAI documentation.",
+    title="LLM Provider Docs Ledger API",
+    description="REST API for scraping, ingesting, summarizing, embedding, and searching provider documentation snapshots.",
     version="0.1.0",
     lifespan=lifespan,
 )

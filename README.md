@@ -1,8 +1,10 @@
-# openai-docs-scraper
+# llm-provider-docs-ledger
 
-Agent-ready local retrieval system for the OpenAI Platform docs.
+Agent-ready local retrieval system for LLM provider API docs.
 
-This project captures the OpenAI docs into a deterministic local snapshot, normalizes pages into canonical Markdown, stores them in SQLite, indexes them with FTS5, optionally adds summaries and embeddings, and serves the corpus through CLI, HTTP API, and MCP tools for coding agents.
+This project captures provider documentation into deterministic local snapshots, normalizes pages into canonical Markdown, stores them in SQLite, indexes them with FTS5, optionally adds summaries and embeddings, and serves the corpus through CLI, HTTP API, and MCP tools for coding agents.
+
+Today the repository ships one concrete source adapter, `openai_docs`, so the active corpus is OpenAI Platform documentation. The system is intentionally structured so other providers can be added behind the same ingestion, retrieval, and export pipeline.
 
 It is intentionally more than a scraper:
 
@@ -72,7 +74,7 @@ Phase 6 hardens the repo for later service evolution without turning it into a h
 
 - `/health`, `/config`, `/docs/stats`, and MCP `get_stats` now expose source, snapshot, stale-artifact, and path metadata
 - `scripts/full_gate_a_smoke.py` exercises API, retrieval, grounded answers, docs stats, and MCP flows in one local command
-- architecture and eval templates now live in `docs/ARCHITECTURE.md` and `docs/EVAL_REPORT_TEMPLATE.md`
+- architecture and eval templates live in `docs/ARCHITECTURE.md` and `docs/EVAL_REPORT_TEMPLATE.md`
 
 ## Installation
 
@@ -101,6 +103,7 @@ With Docker Compose, the app listens on **port 8000** (see `docker-compose.yml`)
 - **POST bodies:** send `Content-Type: application/json`. Request models live in `src/openai_docs_scraper/api/schemas.py`.
 - **Paths (`db_path`, `raw_dir`, `sitemap_path`, `out_path`):** optional on most routes. If omitted, values come from **environment / `.env`** (`DB_PATH`, `RAW_DIR`, `SITEMAP_PATH`, etc.). In Docker, set those to `/data/...` and you can call endpoints with **`{}`** or minimal JSON.
 - **Source selection:** the current adapter is `openai_docs`; `/health`, `/config`, and `/docs/stats` expose the active source and snapshot metadata.
+- **Import path:** the Python package name remains `openai_docs_scraper` for now even though the repository is named `llm-provider-docs-ledger`.
 - **OpenAI:** `POST /process/summarize`, `POST /process/embed`, and **vector** search (`/search/query` with `no_embed: false`) need **`OPENAI_API_KEY`**. FTS-only search (`no_embed: true`) does not.
 
 ### API endpoints (full list)

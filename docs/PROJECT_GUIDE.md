@@ -1,4 +1,4 @@
-# OpenAI Docs Scraper — project guide
+# LLM Provider Docs Ledger — project guide
 
 This document describes how the repository is organized, how data pipelines fit together, how to run everything from scratch, how to refresh data, and how to use the **REST API** and **MCP** interfaces.
 
@@ -24,13 +24,15 @@ This document describes how the repository is organized, how data pipelines fit 
 
 ## What this project does
 
-- **Capture** OpenAI Platform documentation (browser scrape → JSON cache, or use existing cache).
+- **Capture** provider documentation through a source adapter (browser scrape → JSON cache, or use existing cache).
 - **Ingest** cached pages into **SQLite** (`pages`, `chunks`, full-text index on chunks).
 - **Summarize** pages with OpenAI (optional but recommended for navigation blurbs and **page-level** semantic search).
 - **Embed** either **page summaries** or **chunk bodies** for vector search.
 - **Search** locally (CLI or HTTP API) over summaries or chunks.
 - **Answer** questions from the local snapshot with exact citations and freshness warnings.
 - **Export** a monolithic Markdown book and/or a **split bundle** (`index.md` + one `.md` per URL path) for reading and for the docs API/MCP file endpoints.
+
+Today the active source adapter is **`openai_docs`**, so the default corpus is OpenAI Platform documentation. The surrounding system is already structured for future providers.
 
 ---
 
@@ -40,7 +42,7 @@ This document describes how the repository is organized, how data pipelines fit 
 |------|------|------|
 | Library code | `src/openai_docs_scraper/` | Scrape, ingest, extract, DB, embeddings, search, book export, FastAPI app, MCP server |
 | CLI / batch scripts | `scripts/` | `run_ingest`, `run_summarize`, `run_embed`, `query`, `rebuild_split_markdown`, `export_book`, `run_mcp`, etc. |
-| Local data (gitignored typical) | `data/` | `raw_data/`, `docs.sqlite3`, `openai_docs_split_rebuilt/`, `sitemap.xml`, optional `openai_docs_book.md` |
+| Local data (gitignored typical) | `data/` | `raw_data/`, `docs.sqlite3`, `openai_docs_split_rebuilt/`, `sitemap.xml`, optional markdown exports |
 | HTTP API entry | `openai_docs_scraper.api.main:app` | Uvicorn / Docker |
 | Cursor MCP config (example) | `.cursor/mcp.json` | stdio MCP to `scripts/run_mcp.py` |
 
@@ -57,7 +59,7 @@ This document describes how the repository is organized, how data pipelines fit 
 
 ## Configuration (environment)
 
-Settings use **`pydantic-settings`**: defaults in code, override with env vars or a **`.env`** file at the repo root (loaded where `openai_docs_scraper.env` / `get_settings()` is used).
+Settings use **`pydantic-settings`**: defaults in code, override with env vars or a **`.env`** file at the repo root (loaded through `get_settings()`).
 
 | Variable | Default (typical) | Meaning |
 |----------|-------------------|---------|
@@ -365,13 +367,13 @@ The codebase is suitable for a **public** repo if you **do not** commit secrets 
 **Suggested first push:**
 
 ```bash
-cd /path/to/openai-docs-scraper
+cd /path/to/llm-provider-docs-ledger
 git init
 git add .
 git status   # confirm no .env, no data/, no .venv
 git commit -m "Initial public release: scraper, API, MCP, ops guide"
 git branch -M main
-git remote add origin https://github.com/YOU/openai-docs-scraper.git
+git remote add origin https://github.com/YOU/llm-provider-docs-ledger.git
 git push -u origin main
 ```
 
