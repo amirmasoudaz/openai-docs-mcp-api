@@ -1,0 +1,8 @@
+{
+  "url": "https://platform.openai.com/docs/guides/rate-limits",
+  "title": "Rate Limits",
+  "summary": "Guide to handling request quotas with retries, backoff, and usage-aware client design.",
+  "raw": "<html><body><main><article><h1>Rate Limits</h1><p>Rate limits cap how many requests or tokens an organization can send over a time window, so clients need resilient retry behavior.</p><p>Use exponential backoff, jitter, and request smoothing when the API responds with rate limit errors or temporary capacity pressure.</p><h2>Client strategy</h2><p>Track request volume, respect quotas, and queue non-urgent work so interactive traffic stays healthy under load.</p><pre><code>retry(wait=wait_exponential_jitter(initial=1, max=20))</code></pre><p>Good quota handling prevents avoidable failures and makes production systems more stable.</p></article></main></body></html>",
+  "body": null,
+  "hash": "rate-limits-source"
+}

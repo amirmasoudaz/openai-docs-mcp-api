@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 
 import numpy as np
 
@@ -29,6 +30,11 @@ class PageHit:
     source_path: str | None
 
 
+def fts_match_query(text: str) -> str:
+    tokens = re.findall(r"[A-Za-z0-9]+", (text or "").lower())
+    return " OR ".join(f'"{token}"' for token in tokens)
+
+
 def vector_search_chunks(
     *,
     con,
@@ -46,6 +52,9 @@ def vector_search_chunks(
     q = normalize_vec(np.asarray(query_embedding, dtype=np.float32))
 
     if fts_query:
+        fts_query = fts_match_query(fts_query)
+        if not fts_query:
+            return []
         candidate_rows = con.execute(
             """
             SELECT c.id
@@ -73,7 +82,7 @@ def vector_search_chunks(
               p.source_path AS source_path
             FROM chunks c
             JOIN pages p ON p.id = c.page_id
-            WHERE c.embedding IS NOT NULL AND c.id IN ({placeholders});
+            WHERE c.embedding IS NOT NULL AND p.deleted_at IS NULL AND c.id IN ({placeholders});
             """,
             candidate_ids,
         ).fetchall()
@@ -91,7 +100,7 @@ def vector_search_chunks(
               p.source_path AS source_path
             FROM chunks c
             JOIN pages p ON p.id = c.page_id
-            WHERE c.embedding IS NOT NULL;
+            WHERE c.embedding IS NOT NULL AND p.deleted_at IS NULL;
             """
         ).fetchall()
 
@@ -145,6 +154,9 @@ def vector_search_pages(
     q = normalize_vec(np.asarray(query_embedding, dtype=np.float32))
 
     if fts_query:
+        fts_query = fts_match_query(fts_query)
+        if not fts_query:
+            return []
         candidate_rows = con.execute(
             """
             SELECT DISTINCT c.page_id
@@ -169,7 +181,7 @@ def vector_search_pages(
               p.embedding AS embedding,
               p.source_path AS source_path
             FROM pages p
-            WHERE p.embedding IS NOT NULL AND p.id IN ({placeholders});
+            WHERE p.embedding IS NOT NULL AND p.deleted_at IS NULL AND p.id IN ({placeholders});
             """,
             page_ids,
         ).fetchall()
@@ -184,7 +196,7 @@ def vector_search_pages(
               p.embedding AS embedding,
               p.source_path AS source_path
             FROM pages p
-            WHERE p.embedding IS NOT NULL;
+            WHERE p.embedding IS NOT NULL AND p.deleted_at IS NULL;
             """
         ).fetchall()
 
@@ -222,4 +234,3 @@ def vector_search_pages(
             )
         )
     return hits
-

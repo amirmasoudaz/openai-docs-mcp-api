@@ -9,25 +9,23 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from html import escape
 from pathlib import Path
-from urllib.parse import urlparse
 
 from .db import connect, init_db
 from .extract import extract_from_cached_html
 from .ingest_cached import CachedPage, iter_cached_pages
+from .sources import get_source
 from .sitemap import parse_sitemap_xml
 from .text import collapse_single_newlines_outside_fences, normalize_whitespace
 
 
 def normalize_doc_url(url: str) -> str:
-    """Align sitemap, DB, and cache URLs (trailing slash, scheme/host case)."""
-    p = urlparse((url or "").strip())
-    scheme = (p.scheme or "https").lower()
-    netloc = (p.netloc or "").lower()
-    path = (p.path or "").rstrip("/") or "/"
-    return f"{scheme}://{netloc}{path}"
+    """Align sitemap, DB, and cache URLs through the configured source adapter."""
+    return get_source().normalize_url(url)
 
 
 def _anchor_id_for_url(url: str, used: dict[str, int]) -> str:
+    from urllib.parse import urlparse
+
     path = urlparse(url).path.strip("/")
     if not path:
         base = "page"
@@ -41,17 +39,8 @@ def _anchor_id_for_url(url: str, used: dict[str, int]) -> str:
 
 
 def rel_md_path_from_url(url: str) -> Path:
-    """Path under export root: /docs/guides/foo -> guides/foo.md"""
-    parts = [p for p in urlparse(url).path.strip("/").split("/") if p]
-    if parts and parts[0] == "docs":
-        parts = parts[1:]
-    if not parts:
-        parts = ["index"]
-    safe: list[str] = []
-    for raw in parts:
-        s = re.sub(r"[^a-zA-Z0-9._-]", "-", raw).strip("-").lower() or "page"
-        safe.append(s)
-    return Path(*safe).with_suffix(".md")
+    """Canonical markdown path under export root for the configured source."""
+    return get_source().export_relpath(url)
 
 
 def _esc_toc_title(title: str) -> str:

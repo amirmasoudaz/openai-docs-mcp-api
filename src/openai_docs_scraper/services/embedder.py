@@ -48,7 +48,7 @@ def embed_pages(
     con = connect(db_path)
     init_db(con)
 
-    where = "summary IS NOT NULL"
+    where = "deleted_at IS NULL AND summary IS NOT NULL"
     if not force:
         where += " AND (embedding IS NULL OR embedding_model != ? OR embedding_for_hash IS NULL OR embedding_for_hash != summary_for_hash)"
         rows = con.execute(
@@ -127,7 +127,7 @@ def embed_chunks(
     con = connect(db_path)
     init_db(con)
 
-    where = "chunk_text IS NOT NULL"
+    where = "p.deleted_at IS NULL AND c.chunk_text IS NOT NULL"
     params: list[object] = []
     if not force:
         where += " AND (embedding IS NULL OR embedding_model != ? OR embedding_for_hash IS NULL OR embedding_for_hash != chunk_hash)"
@@ -135,8 +135,9 @@ def embed_chunks(
 
     rows = con.execute(
         f"""
-        SELECT id, chunk_text, chunk_hash
-        FROM chunks
+        SELECT c.id, c.chunk_text, c.chunk_hash
+        FROM chunks c
+        JOIN pages p ON p.id = c.page_id
         WHERE {where}
         LIMIT ?;
         """,

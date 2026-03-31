@@ -1,0 +1,8 @@
+{
+  "url": "https://platform.openai.com/docs/guides/embeddings",
+  "title": "Embeddings",
+  "summary": "Guide to creating embedding vectors for semantic search, retrieval, clustering, and similarity ranking.",
+  "raw": "<html><body><main><article><h1>Embeddings</h1><p>Embeddings convert text into dense vectors so applications can compare meaning instead of relying only on exact keyword overlap.</p><p>Use embedding vectors for semantic search, retrieval augmented generation, clustering, deduplication, and nearest-neighbor lookups.</p><h2>Similarity search</h2><p>Store vectors for your corpus, embed the user query, and rank documents by cosine similarity or another vector distance.</p><pre><code>embedding = client.embeddings.create(model=\"text-embedding-3-small\", input=\"semantic search\")</code></pre><p>Pair vector search with lexical filters when exact terms still matter for precision.</p></article></main></body></html>",
+  "body": null,
+  "hash": "embeddings-source"
+}

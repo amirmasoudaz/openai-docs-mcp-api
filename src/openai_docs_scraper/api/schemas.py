@@ -105,6 +105,10 @@ class IngestRequest(BaseModel):
     db_path: Optional[str] = Field(default=None, description="Omit to use Settings.db_path")
     raw_dir: Optional[str] = Field(default=None, description="Omit to use Settings.raw_dir")
     limit: Optional[int] = Field(default=None, ge=1)
+    mark_missing_deleted: bool = Field(
+        default=True,
+        description="When true, pages missing from the current raw_dir snapshot are marked deleted",
+    )
     force: bool = Field(default=False)
     store_raw_html: bool = Field(default=False)
     store_raw_body_text: bool = Field(default=False)
@@ -117,7 +121,14 @@ class IngestResponse(BaseModel):
 
     pages_seen: int
     pages_ingested: int
+    pages_unchanged: int = 0
+    pages_new: int = 0
+    pages_changed: int = 0
+    pages_deleted: int = 0
     chunks_written: int
+    summaries_invalidated: int = 0
+    page_embeddings_invalidated: int = 0
+    chunk_embeddings_invalidated: int = 0
 
 
 # === Summarize Schemas ===
@@ -179,6 +190,21 @@ class SearchRequest(BaseModel):
     )
 
 
+class AnswerRequest(BaseModel):
+    """Request to answer a question from the local docs snapshot."""
+
+    q: str = Field(..., min_length=1, description="Question to answer from local docs")
+    db_path: Optional[str] = Field(default=None, description="Omit to use Settings.db_path")
+    k: int = Field(default=6, ge=1, le=20)
+    citations_limit: int = Field(default=4, ge=1, le=10)
+    fts: bool = Field(default=True, description="Use FTS prefilter for retrieval")
+    no_embed: bool = Field(default=False, description="Use retrieval without embeddings")
+    target: Literal["chunks", "pages"] = Field(default="chunks")
+    embedding_model: Optional[str] = Field(default=None)
+    answer_model: Optional[str] = Field(default=None, description="OpenAI model for answer synthesis")
+    synthesis_mode: Literal["auto", "extractive", "openai"] = Field(default="auto")
+
+
 class SearchHit(BaseModel):
     """A single search result."""
 
@@ -197,6 +223,10 @@ class SearchHit(BaseModel):
         default=False,
         description="Whether that .md file exists on disk",
     )
+    score_details: Optional[dict[str, float]] = Field(
+        default=None,
+        description="Optional ranking diagnostics for debugging and evaluation",
+    )
 
 
 class SearchResponse(BaseModel):
@@ -211,6 +241,52 @@ class SearchResponse(BaseModel):
     fts: bool = False
     no_embed: bool = False
     group_pages: bool = True
+
+
+class AnswerCitation(BaseModel):
+    """A cited source backing an answer."""
+
+    index: int
+    url: str
+    title: Optional[str]
+    md_relpath: str = ""
+    export_abs_path: Optional[str] = None
+    export_file_exists: bool = False
+    source_path: Optional[str] = None
+    snippet: str
+    score: float
+    last_seen_at: Optional[str] = None
+    last_seen_run_id: Optional[str] = None
+    content_version: Optional[int] = None
+    stale_summary: bool = False
+    stale_page_embedding: bool = False
+
+
+class AnswerFreshness(BaseModel):
+    """Freshness metadata for cited evidence."""
+
+    oldest_last_seen_at: Optional[str] = None
+    newest_last_seen_at: Optional[str] = None
+    cited_run_ids: list[str] = Field(default_factory=list)
+    stale_summary_count: int = 0
+    stale_page_embedding_count: int = 0
+    snapshot_age_days: Optional[float] = None
+
+
+class AnswerResponse(BaseModel):
+    """Response from grounded answer generation."""
+
+    question: str
+    answer: str
+    citations: list[AnswerCitation]
+    warnings: list[str] = Field(default_factory=list)
+    freshness: AnswerFreshness
+    retrieval_target: str
+    retrieval_k: int
+    retrieval_fts: bool
+    retrieval_no_embed: bool
+    synthesis_mode: str
+    synthesis_model: Optional[str] = None
 
 
 # === Docs reader (index + files) ===
@@ -248,16 +324,30 @@ class DocsCatalogResponse(BaseModel):
 class DocsStatsResponse(BaseModel):
     """Database and export directory stats."""
 
+    source_name: str
+    available_sources: list[str]
+    sitemap_url: str
     db_path: str
+    sitemap_path: str
+    sitemap_exists: bool
     pages_total: int
+    pages_deleted: int
     pages_with_plain_text: int
     pages_with_summary: int
     pages_with_page_embedding: int
     chunks_total: int
     chunks_with_embedding: int
+    stale_summaries: int
+    stale_page_embeddings: int
+    newest_last_seen_at: Optional[str] = None
+    oldest_last_seen_at: Optional[str] = None
+    latest_run_id: Optional[str] = None
     md_export_root: str
+    md_export_root_exists: bool
     index_md_exists: bool
     raw_dir: str
+    raw_dir_exists: bool
+    raw_cache_files: int
 
 
 class FileReadResponse(BaseModel):
@@ -268,4 +358,3 @@ class FileReadResponse(BaseModel):
     media_type: str
     content: str
     bytes_length: int
-

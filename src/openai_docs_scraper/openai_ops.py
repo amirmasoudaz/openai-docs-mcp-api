@@ -14,6 +14,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential_jitter
 class OpenAIModels:
     summary_model: str = "gpt-5-nano"
     embedding_model: str = "text-embedding-3-small"
+    answer_model: str = "gpt-5-nano"
 
 
 def _client() -> OpenAI:
@@ -56,3 +57,48 @@ def embed_texts(*, texts: list[str], model: str) -> list[list[float]]:
     resp = client.embeddings.create(model=model, input=texts)
     return [d.embedding for d in resp.data]
 
+
+@retry(wait=wait_exponential_jitter(initial=1, max=20), stop=stop_after_attempt(5))
+def answer_with_citations(*, question: str, evidence: list[dict[str, str]], model: str) -> str:
+    client = _client()
+    evidence_lines = []
+    for item in evidence:
+        evidence_lines.append(
+            "\n".join(
+                [
+                    f"[{item['index']}] title: {item['title']}",
+                    f"[{item['index']}] url: {item['url']}",
+                    f"[{item['index']}] file: {item['md_relpath']}",
+                    f"[{item['index']}] snippet: {item['snippet']}",
+                ]
+            )
+        )
+
+    resp = client.responses.create(
+        model=model,
+        input=[
+            {
+                "role": "system",
+                "content": (
+                    "Answer questions strictly from the provided documentation evidence. "
+                    "Do not use outside knowledge. "
+                    "If the evidence is insufficient, say so directly. "
+                    "Every factual claim must include bracket citations like [1] or [2]. "
+                    "Use only the citation numbers provided in the evidence."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"Question:\n{question}\n\n"
+                    "Evidence:\n"
+                    + "\n\n".join(evidence_lines)
+                ),
+            },
+        ],
+    )
+
+    out = getattr(resp, "output_text", None)
+    if isinstance(out, str) and out.strip():
+        return out.strip()
+    return str(resp).strip()

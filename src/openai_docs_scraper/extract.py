@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from urllib.parse import urlparse
-
 from bs4 import BeautifulSoup, NavigableString
 from markdownify import markdownify as _markdownify
 
+from .sources import get_source
 from .text import normalize_whitespace
 
 
@@ -21,15 +20,8 @@ class ExtractedContent:
 
 
 def infer_section(url: str) -> str | None:
-    """
-    For URLs like https://platform.openai.com/docs/guides/text -> "guides".
-    For https://platform.openai.com/docs/overview -> "overview".
-    """
-    path = urlparse(url).path
-    parts = [p for p in path.split("/") if p]
-    if len(parts) < 2 or parts[0] != "docs":
-        return None
-    return parts[1]
+    """Infer section through the configured source adapter."""
+    return get_source().infer_section(url)
 
 
 def _pick_main_node(soup: BeautifulSoup):

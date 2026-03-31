@@ -45,16 +45,34 @@ sitemap -> raw page cache -> extraction + chunking -> SQLite + FTS5
 
 ## Current limits
 
-- **Source-specific today:** the pipeline is strongest for OpenAI docs and would need abstraction to become a general docs platform.
-- **Snapshot-oriented:** refresh is solid, but incremental diffing and stale-vector invalidation are still future work.
+- **Single adapter today:** the core pipeline now runs through a source adapter boundary, but only the OpenAI docs adapter is implemented.
+- **Local-first today:** the repo is service-ready in shape, not yet a deployed multi-user service with background jobs, auth, or shared tenancy.
 - **Scraping is brittle by nature:** HTML structure, rate limiting, or auth changes upstream can break acquisition.
 
 ## High-value next steps
 
-- Retrieval evaluation with labeled queries, recall@k, and MRR across FTS, vector, and hybrid modes.
-- Incremental sync with content diffing, changed-section detection, and selective re-embedding.
-- Ranking improvements that combine lexical score, vector similarity, and structural boosts.
-- Source abstraction so the same pipeline can support SDK docs, product docs, and internal documentation sites.
+- A second concrete source adapter so the same pipeline can support SDK docs, product docs, and internal documentation sites.
+- Snapshot orchestration and background job execution for scrape, ingest, summarize, embed, and export stages.
+- A service deployment layer around the current local-first core, with shared storage and job state.
+- Broader eval coverage using larger, more realistic query sets and source corpora.
+
+## Source Adapters
+
+The core retrieval/export pipeline now resolves source-specific behavior through adapters in `src/openai_docs_scraper/sources/`.
+
+- adapters define sitemap defaults, URL normalization, section inference, and canonical export-path mapping
+- the current implementation ships one adapter: `openai_docs`
+- core helpers like section inference and markdown export mapping call the adapter boundary instead of hard-coding OpenAI URL rules inline
+
+To add another source later, implement the adapter contract and register it in `openai_docs_scraper.sources`.
+
+## Service-Ready Prep
+
+Phase 6 hardens the repo for later service evolution without turning it into a hosted system yet.
+
+- `/health`, `/config`, `/docs/stats`, and MCP `get_stats` now expose source, snapshot, stale-artifact, and path metadata
+- `scripts/full_gate_a_smoke.py` exercises API, retrieval, grounded answers, docs stats, and MCP flows in one local command
+- architecture and eval templates now live in `docs/ARCHITECTURE.md` and `docs/EVAL_REPORT_TEMPLATE.md`
 
 ## Installation
 
@@ -82,6 +100,7 @@ With Docker Compose, the app listens on **port 8000** (see `docker-compose.yml`)
 - **OpenAPI UI:** open [http://localhost:8000/docs](http://localhost:8000/docs) (Swagger) or `/redoc` for schemas and “Try it out”.
 - **POST bodies:** send `Content-Type: application/json`. Request models live in `src/openai_docs_scraper/api/schemas.py`.
 - **Paths (`db_path`, `raw_dir`, `sitemap_path`, `out_path`):** optional on most routes. If omitted, values come from **environment / `.env`** (`DB_PATH`, `RAW_DIR`, `SITEMAP_PATH`, etc.). In Docker, set those to `/data/...` and you can call endpoints with **`{}`** or minimal JSON.
+- **Source selection:** the current adapter is `openai_docs`; `/health`, `/config`, and `/docs/stats` expose the active source and snapshot metadata.
 - **OpenAI:** `POST /process/summarize`, `POST /process/embed`, and **vector** search (`/search/query` with `no_embed: false`) need **`OPENAI_API_KEY`**. FTS-only search (`no_embed: true`) does not.
 
 ### API endpoints (full list)
@@ -90,8 +109,8 @@ With Docker Compose, the app listens on **port 8000** (see `docker-compose.yml`)
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/health` | Liveness; includes `db_exists`, `index_md_exists`, resolved paths |
-| `GET` | `/config` | Non-secret defaults: `db_path`, `md_export_root`, `raw_dir`, `embedding_model`, `summary_model` |
+| `GET` | `/health` | Liveness plus source, path, snapshot, and stale-artifact state |
+| `GET` | `/config` | Non-secret defaults: source, sitemap, paths, and default models |
 
 **`/project`**
 
@@ -111,7 +130,7 @@ With Docker Compose, the app listens on **port 8000** (see `docker-compose.yml`)
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/ingest/cached` | Read `raw_dir` JSON → SQLite + chunks (`IngestRequest`) |
+| `POST` | `/ingest/cached` | Read `raw_dir` JSON → SQLite + chunks (`IngestRequest`, supports full-refresh vs incremental mode) |
 
 **`/process`**
 
@@ -126,6 +145,7 @@ With Docker Compose, the app listens on **port 8000** (see `docker-compose.yml`)
 |--------|------|-------------|
 | `GET` | `/search/query` | Query params: `q`, `k`, `target` (`chunks` \| `pages`), `fts`, `no_embed`, `group_pages`, `embedding_model`, optional `db_path` |
 | `POST` | `/search/query` | JSON `SearchRequest`: same fields as body |
+| `POST` | `/search/answer` | Citation-first grounded answer over the local snapshot (`AnswerRequest`) |
 
 **`/docs` (read exported Markdown / metadata)**
 
@@ -133,7 +153,7 @@ With Docker Compose, the app listens on **port 8000** (see `docker-compose.yml`)
 |--------|------|-------------|
 | `GET` | `/docs/index` | Full `index.md` from `MD_EXPORT_ROOT` (`DocsIndexResponse`) |
 | `GET` | `/docs/catalog` | All pages from DB + `md_relpath` (`DocsCatalogResponse`) |
-| `GET` | `/docs/stats` | Page/chunk counts, embedding coverage (`DocsStatsResponse`) |
+| `GET` | `/docs/stats` | Page/chunk counts plus source, snapshot, cache, and stale-artifact metadata (`DocsStatsResponse`) |
 | `GET` | `/docs/export/file/{file_path}` | Read a file under **export** root (e.g. `guides/structured-outputs.md`); no `..` |
 | `GET` | `/docs/raw/file/{file_path}` | Read a file under **raw** cache dir (e.g. `abc123….json`) |
 
@@ -165,6 +185,11 @@ curl -s -X POST "$BASE/search/query" \
 curl -s -X POST "$BASE/search/query" \
   -H "Content-Type: application/json" \
   -d '{"q": "structured outputs", "k": 5, "target": "pages"}'
+
+# Grounded answer with exact citations from the local snapshot
+curl -s -X POST "$BASE/search/answer" \
+  -H "Content-Type: application/json" \
+  -d '{"q": "How does function calling work?", "no_embed": true, "synthesis_mode": "extractive"}'
 
 # Same search via GET
 curl -s "$BASE/search/query?q=structured+outputs&k=5&target=pages"
@@ -235,6 +260,71 @@ OPENAI_API_KEY=your-key
 DB_PATH=data/docs.sqlite3
 RAW_DIR=data/raw_data
 ```
+
+## Quality and Evaluation
+
+The repo now includes a repeatable offline retrieval benchmark and a small automated test suite:
+
+```bash
+.venv/bin/python -m pytest -q
+.venv/bin/python scripts/run_eval.py
+PYTHONPATH=src .venv/bin/python scripts/full_gate_a_smoke.py
+```
+
+- Test coverage lives under `tests/` and covers extraction, chunking, FTS trigger sync, safe export-path mapping, and FTS punctuation handling.
+- Service-readiness coverage includes API/MCP smoke checks, grounded answers, snapshot metadata, and source adapter behavior.
+- The offline benchmark corpus lives under `evals/corpus/raw_pages/`.
+- Labeled benchmark queries live under `evals/benchmarks/openai_docs_benchmark.json`.
+- The committed reference baseline lives at `evals/results/baseline_local.json`.
+- Fresh benchmark runs write `evals/results/latest_local.json` by default.
+
+## Incremental Sync Behavior
+
+Phase 3 change tracking is now in place for the local pipeline:
+
+- unchanged pages are detected by content hash and skipped without re-chunking, re-summarizing, or re-embedding
+- changed pages increment `content_version`, record a `page_revisions` row, and leave stale summary or embedding alignment visible through `*_for_hash` fields until downstream jobs refresh them
+- full refresh runs can mark missing pages as deleted so search, docs catalog, and MCP tools stop returning them
+- incremental sync runs can keep missing pages active when the current raw cache is intentionally partial
+
+Examples:
+
+```bash
+# Full refresh: treat raw_dir as the authoritative snapshot and mark missing pages deleted
+python scripts/run_ingest.py --db data/docs.sqlite3 --raw-dir data/raw_data --full-refresh
+
+# Incremental sync: ingest only what is present and do not prune pages missing from this partial cache
+python scripts/run_ingest.py --db data/docs.sqlite3 --raw-dir data/raw_data --incremental
+```
+
+API behavior is the same through `POST /ingest/cached` with `mark_missing_deleted: true|false`.
+
+## Grounded Answers
+
+Phase 4 adds a citation-first answer layer on top of retrieval.
+
+- `POST /search/answer` answers from the local snapshot and returns exact citations
+- each answer includes cited source URLs, markdown paths, local export paths, and freshness metadata
+- warnings surface stale summaries, stale page embeddings, and old snapshots instead of hiding that state
+- raw retrieval still exists and remains the lower-level interface
+
+Example:
+
+```bash
+curl -s -X POST http://localhost:8000/search/answer \
+  -H "Content-Type: application/json" \
+  -d '{
+    "q": "How does function calling work?",
+    "k": 6,
+    "citations_limit": 4,
+    "fts": true,
+    "target": "chunks",
+    "no_embed": true,
+    "synthesis_mode": "extractive"
+  }' | jq
+```
+
+The MCP server also exposes `answer_question` for the same citation-first workflow.
 
 ## Notes
 

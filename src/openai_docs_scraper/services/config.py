@@ -8,6 +8,8 @@ from typing import Optional
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from ..sources import get_source
+
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
@@ -22,7 +24,8 @@ class Settings(BaseSettings):
     db_path: Path = Path("data/docs.sqlite3")
 
     # Sitemap
-    sitemap_url: str = "https://platform.openai.com/docs/sitemap.xml"
+    source_name: str = "openai_docs"
+    sitemap_url: str = get_source("openai_docs").default_sitemap_url
     sitemap_path: Path = Path("data/sitemap.xml")
 
     # Raw data directory
@@ -40,6 +43,7 @@ class Settings(BaseSettings):
     # Models
     summary_model: str = "gpt-5-nano"
     embedding_model: str = "text-embedding-3-small"
+    answer_model: str = "gpt-5-nano"
 
     # Scraping defaults
     scrape_limit: int = 10

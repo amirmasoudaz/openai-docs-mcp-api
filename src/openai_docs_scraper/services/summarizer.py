@@ -49,7 +49,7 @@ def summarize_pages(
     con = connect(db_path)
     init_db(con)
 
-    where = "plain_text IS NOT NULL AND (error IS NULL OR error = '')"
+    where = "deleted_at IS NULL AND plain_text IS NOT NULL AND (error IS NULL OR error = '')"
     params: list[object] = []
 
     if section:

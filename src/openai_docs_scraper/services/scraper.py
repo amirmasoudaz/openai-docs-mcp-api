@@ -7,9 +7,10 @@ from pathlib import Path
 from typing import Optional
 
 from ..db import connect, init_db, upsert_page
-from ..extract import infer_section
+from ..sources import get_source
 from ..selenium_fetcher import SeleniumChromeFetcher
 from ..sitemap import parse_sitemap_xml
+from .config import get_settings
 
 
 @dataclass
@@ -50,6 +51,7 @@ def run_scrape(
     """
     db_path = Path(db_path)
     sitemap_path = Path(sitemap_path)
+    source = get_source(get_settings().source_name)
 
     urls = [u.loc for u in parse_sitemap_xml(sitemap_path.read_bytes())]
     urls = urls[start : start + limit]
@@ -81,7 +83,7 @@ def run_scrape(
             upsert_page(
                 con,
                 url=page.url,
-                section=infer_section(page.url),
+                section=source.infer_section(page.url),
                 title=page.title,
                 raw_html=page.raw_html,
                 raw_body_text=None,
@@ -94,6 +96,12 @@ def run_scrape(
                 source_hash=None,
                 http_status=200 if page.error is None else None,
                 error=page.error,
+                content_version=1,
+                changed_at=page.scraped_at,
+                last_seen_at=None,
+                last_seen_run_id=None,
+                deleted_at=None,
+                deletion_reason=None,
             )
 
     con.close()

@@ -1,0 +1,8 @@
+{
+  "url": "https://platform.openai.com/docs/models/gpt-4.1",
+  "title": "GPT-4.1",
+  "summary": "Model overview for GPT-4.1 covering long context, coding strength, and instruction-following behavior.",
+  "raw": "<html><body><main><article><h1>GPT-4.1</h1><p>GPT-4.1 is a capable general-purpose model family with strong instruction following, coding performance, and long-context behavior.</p><p>Use it when you need reliable reasoning over large prompts, precise tool use, or stronger code generation than lighter models provide.</p><h2>Choosing the model</h2><p>Select GPT-4.1 when task quality matters more than the smallest possible latency or cost footprint.</p><pre><code>model=\"gpt-4.1\"</code></pre><p>Evaluate capability, latency, and price tradeoffs against smaller or faster models for your workload.</p></article></main></body></html>",
+  "body": null,
+  "hash": "gpt-4.1-source"
+}

@@ -12,9 +12,9 @@ from ..schemas import (
     FileReadResponse,
 )
 from ...book_export import rel_md_path_from_url
-from ...db import connect, init_db
 from ...safe_paths import PathOutsideRootError, resolve_under_root
 from ...services.config import get_settings
+from ...services.state import collect_artifact_state
 
 router = APIRouter()
 
@@ -59,6 +59,7 @@ async def get_catalog():
                (summary IS NOT NULL AND TRIM(summary) != '') AS has_summary,
                (embedding IS NOT NULL) AS has_page_embedding
         FROM pages
+        WHERE deleted_at IS NULL
         ORDER BY url;
         """
     ).fetchall()
@@ -86,46 +87,35 @@ async def get_catalog():
 async def get_stats():
     """Counts for pages/chunks and whether the export index exists."""
     settings = get_settings()
-    db_path = settings.db_path.expanduser().resolve()
-    md_root = settings.md_export_root.expanduser().resolve()
-    raw_dir = settings.raw_dir.expanduser().resolve()
-
-    if not db_path.is_file():
-        raise HTTPException(status_code=404, detail=f"database not found: {db_path}")
-
-    con = connect(db_path)
-    init_db(con)
-    pages_total = int(con.execute("SELECT COUNT(*) FROM pages").fetchone()[0])
-    pages_with_plain_text = int(
-        con.execute(
-            "SELECT COUNT(*) FROM pages WHERE plain_text IS NOT NULL AND TRIM(plain_text) != ''"
-        ).fetchone()[0]
-    )
-    pages_with_summary = int(
-        con.execute(
-            "SELECT COUNT(*) FROM pages WHERE summary IS NOT NULL AND TRIM(summary) != ''"
-        ).fetchone()[0]
-    )
-    pages_with_page_embedding = int(
-        con.execute("SELECT COUNT(*) FROM pages WHERE embedding IS NOT NULL").fetchone()[0]
-    )
-    chunks_total = int(con.execute("SELECT COUNT(*) FROM chunks").fetchone()[0])
-    chunks_with_embedding = int(
-        con.execute("SELECT COUNT(*) FROM chunks WHERE embedding IS NOT NULL").fetchone()[0]
-    )
-    con.close()
+    state = collect_artifact_state(settings)
+    if not state.db_exists:
+        raise HTTPException(status_code=404, detail=f"database not found: {state.db_path}")
 
     return DocsStatsResponse(
-        db_path=str(db_path),
-        pages_total=pages_total,
-        pages_with_plain_text=pages_with_plain_text,
-        pages_with_summary=pages_with_summary,
-        pages_with_page_embedding=pages_with_page_embedding,
-        chunks_total=chunks_total,
-        chunks_with_embedding=chunks_with_embedding,
-        md_export_root=str(md_root),
-        index_md_exists=(md_root / "index.md").is_file(),
-        raw_dir=str(raw_dir),
+        source_name=state.source_name,
+        available_sources=state.available_sources,
+        sitemap_url=state.sitemap_url,
+        db_path=state.db_path,
+        sitemap_path=state.sitemap_path,
+        sitemap_exists=state.sitemap_exists,
+        pages_total=state.pages_total,
+        pages_deleted=state.pages_deleted,
+        pages_with_plain_text=state.pages_with_plain_text,
+        pages_with_summary=state.pages_with_summary,
+        pages_with_page_embedding=state.pages_with_page_embedding,
+        chunks_total=state.chunks_total,
+        chunks_with_embedding=state.chunks_with_embedding,
+        stale_summaries=state.stale_summaries,
+        stale_page_embeddings=state.stale_page_embeddings,
+        newest_last_seen_at=state.newest_last_seen_at,
+        oldest_last_seen_at=state.oldest_last_seen_at,
+        latest_run_id=state.latest_run_id,
+        md_export_root=state.md_export_root,
+        md_export_root_exists=state.md_export_root_exists,
+        index_md_exists=state.index_md_exists,
+        raw_dir=state.raw_dir,
+        raw_dir_exists=state.raw_dir_exists,
+        raw_cache_files=state.raw_cache_files,
     )
 
 

@@ -10,6 +10,7 @@ from .ingestion import ingest_from_cache, IngestionResult
 from .summarizer import summarize_pages, SummarizeResult
 from .embedder import embed_pages, embed_chunks, EmbedResult
 from .search import query, SearchHit
+from .answering import answer_question, AnswerCitation, AnswerFreshness, AnswerResult
 
 __all__ = [
     "Settings",
@@ -28,6 +29,10 @@ __all__ = [
     "EmbedResult",
     "query",
     "SearchHit",
+    "answer_question",
+    "AnswerCitation",
+    "AnswerFreshness",
+    "AnswerResult",
 ]
 
 

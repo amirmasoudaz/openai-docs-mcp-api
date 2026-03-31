@@ -8,8 +8,9 @@ from typing import Optional
 
 import httpx
 
-from ..constants import DEFAULT_SITEMAP_URL
 from ..db import connect, init_db
+from ..services.config import get_settings
+from ..sources import get_source
 from ..sitemap import parse_sitemap_xml
 
 
@@ -41,7 +42,7 @@ def init_project(db_path: str | Path) -> Path:
 
 def fetch_sitemap(
     out_path: str | Path,
-    url: str = DEFAULT_SITEMAP_URL,
+    url: str | None = None,
     timeout: float = 60.0,
 ) -> Path:
     """
@@ -55,6 +56,10 @@ def fetch_sitemap(
     Returns:
         Path to the saved sitemap file.
     """
+    if url is None:
+        settings = get_settings()
+        url = settings.sitemap_url or get_source(settings.source_name).default_sitemap_url
+
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with httpx.Client(follow_redirects=True, timeout=timeout) as client:

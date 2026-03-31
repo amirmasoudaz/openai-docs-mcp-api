@@ -16,7 +16,14 @@ class IngestionResult:
 
     pages_seen: int
     pages_ingested: int
+    pages_unchanged: int
+    pages_new: int
+    pages_changed: int
+    pages_deleted: int
     chunks_written: int
+    summaries_invalidated: int
+    page_embeddings_invalidated: int
+    chunk_embeddings_invalidated: int
 
 
 def ingest_from_cache(
@@ -24,6 +31,7 @@ def ingest_from_cache(
     raw_dir: str | Path,
     *,
     limit: Optional[int] = None,
+    mark_missing_deleted: bool = True,
     force: bool = False,
     store_raw_html: bool = False,
     store_raw_body_text: bool = False,
@@ -57,6 +65,7 @@ def ingest_from_cache(
         con=con,
         raw_dir=raw_dir,
         max_pages=limit,
+        mark_missing_deleted=mark_missing_deleted,
         force=force,
         store_raw_html=store_raw_html,
         store_raw_body_text=store_raw_body_text,
@@ -69,5 +78,12 @@ def ingest_from_cache(
     return IngestionResult(
         pages_seen=stats["pages_seen"],
         pages_ingested=stats["pages_ingested"],
+        pages_unchanged=stats["pages_unchanged"],
+        pages_new=stats["pages_new"],
+        pages_changed=stats["pages_changed"],
+        pages_deleted=stats["pages_deleted"],
         chunks_written=stats["chunks_written"],
+        summaries_invalidated=stats["summaries_invalidated"],
+        page_embeddings_invalidated=stats["page_embeddings_invalidated"],
+        chunk_embeddings_invalidated=stats["chunk_embeddings_invalidated"],
     )

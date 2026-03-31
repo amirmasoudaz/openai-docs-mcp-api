@@ -29,6 +29,7 @@ This document describes how the repository is organized, how data pipelines fit 
 - **Summarize** pages with OpenAI (optional but recommended for navigation blurbs and **page-level** semantic search).
 - **Embed** either **page summaries** or **chunk bodies** for vector search.
 - **Search** locally (CLI or HTTP API) over summaries or chunks.
+- **Answer** questions from the local snapshot with exact citations and freshness warnings.
 - **Export** a monolithic Markdown book and/or a **split bundle** (`index.md` + one `.md` per URL path) for reading and for the docs API/MCP file endpoints.
 
 ---
@@ -61,6 +62,7 @@ Settings use **`pydantic-settings`**: defaults in code, override with env vars o
 | Variable | Default (typical) | Meaning |
 |----------|-------------------|---------|
 | `OPENAI_API_KEY` | — | Required for summarize, embed, and semantic **search** |
+| `SOURCE_NAME` | `openai_docs` | Active source adapter |
 | `DB_PATH` | `data/docs.sqlite3` | SQLite database path |
 | `RAW_DIR` | `data/raw_data` | Directory of cached JSON pages |
 | `MD_EXPORT_ROOT` | `data/openai_docs_split_rebuilt` | Split Markdown root (`index.md`, `**/*.md`) |
@@ -173,7 +175,9 @@ PYTHONPATH=src python scripts/rebuild_split_markdown.py --openai-index
 
 ### Refresh after new scrapes
 
-1. Ingest new/overwritten JSON: `run_ingest.py` (add **`--force`** to rewrite even if hash unchanged).
+1. Ingest new/overwritten JSON:
+   - `run_ingest.py --full-refresh` when `raw_dir` is the authoritative snapshot and missing pages should be marked deleted.
+   - `run_ingest.py --incremental` when `raw_dir` is partial and missing pages should remain active.
 2. Re-run **`run_summarize.py`** for pages missing summaries (**`--force`** to redo all).
 3. Re-run **`run_embed.py`** with **`--force`** if text/summary changed so vectors stay aligned.
 
@@ -208,6 +212,7 @@ Prefer a **full pass**: scrape/update **`raw_data`** → **`run_ingest --force`*
 |--------|------|--------|
 | GET | `/search/query` | Query params: `q`, `k`, `target` (`chunks`\|`pages`), `fts`, `no_embed`, `group_pages`, `embedding_model`, `db_path` (optional) |
 | POST | `/search/query` | JSON body: see `SearchRequest` in `api/schemas.py` |
+| POST | `/search/answer` | Citation-first grounded answer over the local snapshot |
 
 **`SearchResponse` (highlight)** includes: `hits[]` with `url`, `title`, `summary`, `chunk_text`, `score`, `source_path`, `md_relpath`, `export_abs_path`, `export_file_exists`, plus `db_path`, `target`, `embedding_model`, `fts`, `no_embed`, `group_pages`.
 
@@ -253,6 +258,8 @@ curl -s 'http://localhost:8000/docs/export/file/guides/structured-outputs.md' | 
 | `get_stats` | JSON DB/export stats |
 
 `search_docs` returns a **JSON string** of hits (MCP transports text).
+
+`answer_question` returns a **JSON string** containing the answer, citations, warnings, and freshness metadata.
 
 ### Transports
 
@@ -306,6 +313,37 @@ Rebuild images after dependency or code changes.
 | API **unable to open database file** (Docker) | Default `db_path` pointed at `/app/...` | Omit `db_path` in requests or set **`DB_PATH=/data/docs.sqlite3`** (compose already does) |
 | MCP Docker crash on `run()` | Old `host=` on `run()` | Fixed: host/port go on **`FastMCP(...)`**; use current `mcp_server.py` |
 | `get_doc_file` 404 | Export missing | Run **`rebuild_split_markdown`** into **`MD_EXPORT_ROOT`** |
+| Answer warnings mention stale summaries or embeddings | Ingestion changed but downstream artifacts are old | Re-run `run_summarize.py` and/or `run_embed.py` |
+
+---
+
+## Local quality gate
+
+Run the repo-level smoke gate after structural changes:
+
+```bash
+PYTHONPATH=src .venv/bin/python scripts/full_gate_a_smoke.py
+```
+
+This exercises:
+
+- API health/config/docs stats
+- FTS retrieval
+- grounded answers
+- MCP search and MCP answers
+
+---
+
+## Local-first to service-ready path
+
+The project is still local-first, but the current code is now shaped so it can evolve into a service later:
+
+- source behavior is isolated behind adapters
+- artifact and snapshot state is collected through a dedicated service
+- retrieval and answer flows are service-layer functions, not route-only logic
+- the smoke gate exercises the system as a product slice, not just as library code
+
+The next move toward service mode should be background jobs and snapshot orchestration, not replacing SQLite prematurely.
 
 ---
 

@@ -1,0 +1,8 @@
+{
+  "url": "https://platform.openai.com/docs/guides/function-calling",
+  "title": "Function Calling",
+  "summary": "Guide to defining tools and letting models return structured function calls with validated arguments.",
+  "raw": "<html><body><main><article><h1>Function Calling</h1><p>Function calling lets a model decide when to call a tool and return structured arguments that your application can execute.</p><p>Define each tool with a name, description, and JSON schema for arguments so the model knows what inputs are allowed.</p><h2>Tool execution loop</h2><p>Applications inspect the tool call, run the external function, and send the result back to the model for another response step.</p><pre><code>{\"name\":\"get_weather\",\"parameters\":{\"type\":\"object\",\"properties\":{\"city\":{\"type\":\"string\"}}}}</code></pre><p>This pattern is useful for assistants that browse data, call internal APIs, or chain multiple tool invocations.</p></article></main></body></html>",
+  "body": null,
+  "hash": "function-calling-source"
+}

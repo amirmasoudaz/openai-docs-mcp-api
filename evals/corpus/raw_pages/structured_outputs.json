@@ -1,0 +1,8 @@
+{
+  "url": "https://platform.openai.com/docs/guides/structured-outputs",
+  "title": "Structured Outputs",
+  "summary": "Guide to generating schema-constrained JSON with the Responses API and strict structured outputs.",
+  "raw": "<html><body><main><article><h1>Structured Outputs</h1><p>Structured outputs help you force model responses to match a JSON schema so downstream code can parse results safely.</p><p>Use strict schemas with the Responses API when you need predictable keys, validated types, and machine-readable output.</p><h2>When to use it</h2><p>Choose this pattern for extraction pipelines, typed assistants, or any workflow that must reject malformed JSON.</p><pre><code>{\"type\":\"object\",\"properties\":{\"answer\":{\"type\":\"string\"}},\"required\":[\"answer\"]}</code></pre><p>Combine schema validation with application checks to keep tool calls and final answers consistent.</p></article></main></body></html>",
+  "body": null,
+  "hash": "structured-outputs-source"
+}

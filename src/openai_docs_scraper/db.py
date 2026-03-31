@@ -44,7 +44,13 @@ def init_db(con: sqlite3.Connection) -> None:
           embedding BLOB,
           embedding_model TEXT,
           embedding_updated_at TEXT,
-          embedding_for_hash TEXT
+          embedding_for_hash TEXT,
+          content_version INTEGER,
+          changed_at TEXT,
+          last_seen_at TEXT,
+          last_seen_run_id TEXT,
+          deleted_at TEXT,
+          deletion_reason TEXT
         );
         """
     )
@@ -75,6 +81,21 @@ def init_db(con: sqlite3.Connection) -> None:
         """
     )
 
+    con.execute(
+        """
+        CREATE TABLE IF NOT EXISTS page_revisions (
+          id INTEGER PRIMARY KEY,
+          page_id INTEGER NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
+          content_version INTEGER NOT NULL,
+          content_hash TEXT,
+          title TEXT,
+          observed_at TEXT NOT NULL,
+          source_hash TEXT,
+          UNIQUE(page_id, content_version)
+        );
+        """
+    )
+
     con.executescript(
         """
         CREATE TRIGGER IF NOT EXISTS chunks_ai AFTER INSERT ON chunks BEGIN
@@ -99,9 +120,16 @@ def init_db(con: sqlite3.Connection) -> None:
     _ensure_column(con, "pages", "source_hash", "TEXT")
     _ensure_column(con, "pages", "summary_for_hash", "TEXT")
     _ensure_column(con, "pages", "embedding_for_hash", "TEXT")
+    _ensure_column(con, "pages", "content_version", "INTEGER")
+    _ensure_column(con, "pages", "changed_at", "TEXT")
+    _ensure_column(con, "pages", "last_seen_at", "TEXT")
+    _ensure_column(con, "pages", "last_seen_run_id", "TEXT")
+    _ensure_column(con, "pages", "deleted_at", "TEXT")
+    _ensure_column(con, "pages", "deletion_reason", "TEXT")
     _ensure_column(con, "chunks", "embedding_for_hash", "TEXT")
 
     con.execute("CREATE INDEX IF NOT EXISTS idx_pages_section ON pages(section);")
+    con.execute("CREATE INDEX IF NOT EXISTS idx_pages_deleted_at ON pages(deleted_at);")
     con.execute("CREATE INDEX IF NOT EXISTS idx_chunks_page_id ON chunks(page_id);")
     con.commit()
 
@@ -130,6 +158,12 @@ def upsert_page(
     source_hash: str | None,
     http_status: int | None,
     error: str | None,
+    content_version: int | None,
+    changed_at: str | None,
+    last_seen_at: str | None,
+    last_seen_run_id: str | None,
+    deleted_at: str | None,
+    deletion_reason: str | None,
 ) -> int:
     # NOTE: Avoid a single large UPSERT statement here.
     # In some sandboxed environments SQLite can fail with "unable to open database file"
@@ -151,7 +185,13 @@ def upsert_page(
           source_path = ?,
           source_hash = ?,
           http_status = ?,
-          error = ?
+          error = ?,
+          content_version = ?,
+          changed_at = ?,
+          last_seen_at = ?,
+          last_seen_run_id = ?,
+          deleted_at = ?,
+          deletion_reason = ?
         WHERE url = ?;
         """,
         (
@@ -168,6 +208,12 @@ def upsert_page(
             source_hash,
             http_status,
             error,
+            content_version,
+            changed_at,
+            last_seen_at,
+            last_seen_run_id,
+            deleted_at,
+            deletion_reason,
             url,
         ),
     )
@@ -202,4 +248,26 @@ def replace_chunks(
                 chunk.get("chunk_hash"),
             ),
         )
+    con.commit()
+
+
+def insert_page_revision(
+    con: sqlite3.Connection,
+    *,
+    page_id: int,
+    content_version: int,
+    content_hash: str | None,
+    title: str | None,
+    observed_at: str,
+    source_hash: str | None,
+) -> None:
+    con.execute(
+        """
+        INSERT OR IGNORE INTO page_revisions(
+          page_id, content_version, content_hash, title, observed_at, source_hash
+        )
+        VALUES (?, ?, ?, ?, ?, ?);
+        """,
+        (page_id, content_version, content_hash, title, observed_at, source_hash),
+    )
     con.commit()

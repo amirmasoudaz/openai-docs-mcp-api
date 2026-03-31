@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from ..services.config import get_settings
+from ..services.state import collect_artifact_state
 from .routes import docs, ingest, process, project, scrape, search
 
 
@@ -48,12 +49,18 @@ app.include_router(docs.router, prefix="/docs", tags=["Docs"])
 async def app_config():
     """Resolved defaults for data paths and models (no secrets)."""
     s = get_settings()
+    state = collect_artifact_state(s)
     return {
+        "source_name": s.source_name,
+        "available_sources": state.available_sources,
+        "sitemap_url": s.sitemap_url,
+        "sitemap_path": str(s.sitemap_path.expanduser().resolve()),
         "db_path": str(s.db_path.expanduser().resolve()),
         "md_export_root": str(s.md_export_root.expanduser().resolve()),
         "raw_dir": str(s.raw_dir.expanduser().resolve()),
         "embedding_model": s.embedding_model,
         "summary_model": s.summary_model,
+        "answer_model": s.answer_model,
     }
 
 
@@ -61,12 +68,11 @@ async def app_config():
 async def health_check():
     """Health check with paths from settings (database / export may be mounted volumes)."""
     s = get_settings()
-    db = s.db_path.expanduser().resolve()
-    export = s.md_export_root.expanduser().resolve()
+    state = collect_artifact_state(s)
+    status = "healthy"
+    if not state.db_exists or not state.raw_dir_exists:
+        status = "degraded"
     return {
-        "status": "healthy",
-        "db_path": str(db),
-        "db_exists": db.is_file(),
-        "md_export_root": str(export),
-        "index_md_exists": (export / "index.md").is_file(),
+        "status": status,
+        **state.as_dict(),
     }

@@ -4,6 +4,7 @@ Transport: stdio (default) — add --sse to run as SSE server on HTTP.
 
 Tools exposed:
   search_docs          - semantic similarity search over summaries or chunks
+  answer_question      - grounded answer with exact local citations and freshness metadata
   get_doc_file         - read a split .md file (e.g. guides/structured-outputs.md)
   get_page_by_url      - look up a page by its OpenAI docs URL, return content
   get_navigation_index - full index.md (TOC with blurbs for every page)
@@ -24,6 +25,7 @@ from .book_export import rel_md_path_from_url
 from .db import connect, init_db
 from .safe_paths import PathOutsideRootError, resolve_under_root
 from .services.config import get_settings
+from .services.state import collect_artifact_state
 
 
 def _mcp_listen() -> tuple[str, int]:
@@ -41,6 +43,7 @@ mcp = FastMCP(
         "Use these tools to search and read the local mirror of the OpenAI platform "
         "documentation. Always prefer `search_docs` for open-ended questions, then "
         "fetch the full file with `get_doc_file` using the returned `md_relpath`. "
+        "Use `answer_question` when you need a citation-first answer grounded in the local snapshot. "
         "Use `get_navigation_index` to orient yourself across all sections."
     ),
     host=_mcp_host,
@@ -87,6 +90,7 @@ def search_docs(
     k: int = 8,
     target: str = "pages",
     fts_prefilter: bool = False,
+    no_embed: bool = False,
 ) -> str:
     """Search the OpenAI documentation by meaning.
 
@@ -104,6 +108,9 @@ def search_docs(
     fts_prefilter : bool
         When True, first filter candidates via full-text search (BM25) then
         re-rank by embedding similarity. Useful to narrow recall on rare terms.
+    no_embed : bool
+        When True, use retrieval without query embeddings. Useful for offline
+        smoke tests and purely lexical lookups.
 
     Returns
     -------
@@ -120,6 +127,7 @@ def search_docs(
         q=query,
         k=k,
         fts=fts_prefilter,
+        no_embed=no_embed,
         target=tgt,
     )
     export_root = _export_root()
@@ -144,6 +152,80 @@ def search_docs(
             }
         )
     return json.dumps(results, ensure_ascii=False, indent=2)
+
+
+@mcp.tool()
+def answer_question(
+    question: str,
+    k: int = 6,
+    citations_limit: int = 4,
+    target: str = "chunks",
+    fts_prefilter: bool = True,
+    no_embed: bool = False,
+    synthesis_mode: str = "auto",
+) -> str:
+    """Answer a question from the local docs snapshot with exact citations.
+
+    Returns a JSON object with:
+      answer, citations, warnings, freshness, retrieval settings, synthesis mode.
+    """
+    from .services.answering import answer_question as _answer_question
+
+    k = max(1, min(k, 20))
+    citations_limit = max(1, min(citations_limit, 10))
+    tgt = target if target in ("pages", "chunks") else "chunks"
+    mode = synthesis_mode if synthesis_mode in ("auto", "extractive", "openai") else "auto"
+
+    result = _answer_question(
+        db_path=_db_path(),
+        question=question,
+        k=k,
+        citations_limit=citations_limit,
+        target=tgt,
+        fts=fts_prefilter,
+        no_embed=no_embed,
+        synthesis_mode=mode,
+    )
+
+    payload = {
+        "question": result.question,
+        "answer": result.answer,
+        "citations": [
+            {
+                "index": citation.index,
+                "url": citation.url,
+                "title": citation.title,
+                "md_relpath": citation.md_relpath,
+                "export_abs_path": citation.export_abs_path,
+                "export_file_exists": citation.export_file_exists,
+                "source_path": citation.source_path,
+                "snippet": citation.snippet,
+                "score": round(citation.score, 4),
+                "last_seen_at": citation.last_seen_at,
+                "last_seen_run_id": citation.last_seen_run_id,
+                "content_version": citation.content_version,
+                "stale_summary": citation.stale_summary,
+                "stale_page_embedding": citation.stale_page_embedding,
+            }
+            for citation in result.citations
+        ],
+        "warnings": result.warnings,
+        "freshness": {
+            "oldest_last_seen_at": result.freshness.oldest_last_seen_at,
+            "newest_last_seen_at": result.freshness.newest_last_seen_at,
+            "cited_run_ids": result.freshness.cited_run_ids,
+            "stale_summary_count": result.freshness.stale_summary_count,
+            "stale_page_embedding_count": result.freshness.stale_page_embedding_count,
+            "snapshot_age_days": result.freshness.snapshot_age_days,
+        },
+        "retrieval_target": result.retrieval_target,
+        "retrieval_k": result.retrieval_k,
+        "retrieval_fts": result.retrieval_fts,
+        "retrieval_no_embed": result.retrieval_no_embed,
+        "synthesis_mode": result.synthesis_mode,
+        "synthesis_model": result.synthesis_model,
+    }
+    return json.dumps(payload, ensure_ascii=False, indent=2)
 
 
 @mcp.tool()
@@ -238,7 +320,7 @@ def get_catalog(section: Optional[str] = None) -> str:
             SELECT url, title, section, summary,
                    (summary IS NOT NULL AND TRIM(summary) != '') AS has_summary,
                    (embedding IS NOT NULL) AS has_page_embedding
-            FROM pages WHERE LOWER(section) = LOWER(?) ORDER BY url;
+            FROM pages WHERE deleted_at IS NULL AND LOWER(section) = LOWER(?) ORDER BY url;
             """,
             (section,),
         ).fetchall()
@@ -248,7 +330,7 @@ def get_catalog(section: Optional[str] = None) -> str:
             SELECT url, title, section, summary,
                    (summary IS NOT NULL AND TRIM(summary) != '') AS has_summary,
                    (embedding IS NOT NULL) AS has_page_embedding
-            FROM pages ORDER BY section, url;
+            FROM pages WHERE deleted_at IS NULL ORDER BY section, url;
             """
         ).fetchall()
     con.close()
@@ -280,41 +362,10 @@ def get_stats() -> str:
     -------
     JSON object with page/chunk counts, embedding coverage, and path info.
     """
-    db = _db_path()
-    export = _export_root()
-    raw = _raw_root()
-
-    if not db.is_file():
-        return json.dumps({"error": f"database not found: {db}"})
-
-    con = connect(db)
-    init_db(con)
-    stats = {
-        "db_path": str(db),
-        "pages_total": int(con.execute("SELECT COUNT(*) FROM pages").fetchone()[0]),
-        "pages_with_plain_text": int(
-            con.execute(
-                "SELECT COUNT(*) FROM pages WHERE plain_text IS NOT NULL AND TRIM(plain_text) != ''"
-            ).fetchone()[0]
-        ),
-        "pages_with_summary": int(
-            con.execute(
-                "SELECT COUNT(*) FROM pages WHERE summary IS NOT NULL AND TRIM(summary) != ''"
-            ).fetchone()[0]
-        ),
-        "pages_with_page_embedding": int(
-            con.execute("SELECT COUNT(*) FROM pages WHERE embedding IS NOT NULL").fetchone()[0]
-        ),
-        "chunks_total": int(con.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]),
-        "chunks_with_embedding": int(
-            con.execute("SELECT COUNT(*) FROM chunks WHERE embedding IS NOT NULL").fetchone()[0]
-        ),
-        "md_export_root": str(export),
-        "index_md_exists": (export / "index.md").is_file(),
-        "raw_dir": str(raw),
-    }
-    con.close()
-    return json.dumps(stats, ensure_ascii=False, indent=2)
+    state = collect_artifact_state(_settings())
+    if not state.db_exists:
+        return json.dumps({"error": f"database not found: {state.db_path}", **state.as_dict()}, ensure_ascii=False, indent=2)
+    return json.dumps(state.as_dict(), ensure_ascii=False, indent=2)
 
 
 # ─── entry point ─────────────────────────────────────────────────────────────
