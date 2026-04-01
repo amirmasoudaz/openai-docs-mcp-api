@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from html import escape
 from pathlib import Path
 
-from .db import connect, init_db
+from .db import connect, init_db, mark_pages_exported
 from .extract import extract_from_cached_html
 from .ingest_cached import CachedPage, iter_cached_pages
 from .sources import get_source
@@ -434,4 +434,25 @@ def export_book_bundle(
         raw_dir=raw_dir,
     )
     write_book_bundle(entries, out_dir)
+    con = connect(db_path)
+    init_db(con)
+    exported_urls = {entry.url for entry in entries}
+    rows = con.execute(
+        """
+        SELECT url, content_hash
+        FROM pages
+        WHERE deleted_at IS NULL;
+        """
+    ).fetchall()
+    page_hashes = [
+        (str(row["url"]), row["content_hash"])
+        for row in rows
+        if str(row["url"]) in exported_urls
+    ]
+    mark_pages_exported(
+        con,
+        exported_at=datetime.now(timezone.utc).isoformat(),
+        page_hashes=page_hashes,
+    )
+    con.close()
     return stats

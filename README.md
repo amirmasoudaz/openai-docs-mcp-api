@@ -217,6 +217,9 @@ All scripts are in the `scripts/` directory:
 # Initialize database
 python scripts/init_project.py --db data/docs.sqlite3
 
+# Run a tracked refresh from the current raw cache snapshot
+python scripts/run_refresh.py --db data/docs.sqlite3 --raw-dir data/raw_data --sitemap data/sitemap.xml --no-fetch-sitemap
+
 # Ingest cached pages
 python scripts/run_ingest.py --db data/docs.sqlite3 --raw-dir data/raw_data
 
@@ -235,10 +238,10 @@ python scripts/query.py -q "how do I do function calling?" -k 10
 
 ## Quick Start
 
-1. **Initialize DB and ingest cached data:**
+1. **Initialize DB and publish a tracked snapshot from cached data:**
    ```bash
    python scripts/init_project.py
-   python scripts/run_ingest.py
+   python scripts/run_refresh.py --no-fetch-sitemap
    ```
 
 2. **Quick keyword search (no OpenAI calls):**
@@ -287,6 +290,8 @@ Phase 3 change tracking is now in place for the local pipeline:
 
 - unchanged pages are detected by content hash and skipped without re-chunking, re-summarizing, or re-embedding
 - changed pages increment `content_version`, record a `page_revisions` row, and leave stale summary or embedding alignment visible through `*_for_hash` fields until downstream jobs refresh them
+- pages now track an explicit `page_state` such as `new`, `unchanged`, `changed`, `deleted`, or `failed`
+- split-markdown exports also track freshness through `export_for_hash`, so the repo can report when exported docs are stale relative to the latest ingested content
 - full refresh runs can mark missing pages as deleted so search, docs catalog, and MCP tools stop returning them
 - incremental sync runs can keep missing pages active when the current raw cache is intentionally partial
 
@@ -301,6 +306,52 @@ python scripts/run_ingest.py --db data/docs.sqlite3 --raw-dir data/raw_data --in
 ```
 
 API behavior is the same through `POST /ingest/cached` with `mark_missing_deleted: true|false`.
+
+## Refresh Runs and Published Snapshots
+
+Phase 1 of the expansion plan adds a tracked refresh flow for the active source.
+
+- `scripts/run_refresh.py` creates a refresh `run`, ingests the current raw cache into a staged SQLite database, and only publishes that database on success
+- `/health`, `/config`, and `/docs/stats` now expose:
+  - latest run id and status
+  - latest successful run id
+  - active snapshot id and publication timestamp
+- if a refresh fails, search and grounded answers continue using the previously published database snapshot
+
+## Phase 2 Signals
+
+Phase 2 extends the local ledger so change handling is visible, not implicit.
+
+- `POST /ingest/cached` now reports `pages_failed` and `exports_invalidated`
+- `/docs/stats` now reports `pages_failed` and `stale_exports`
+- exporting the split markdown bundle marks exported pages fresh against the current `content_hash`
+- a later content change makes that export stale until the bundle is rebuilt
+
+## Phase 3 Change Ledger
+
+Phase 3 turns the recorded change state into inspectable history.
+
+- `GET /docs/page/history?url=...` returns revision history for one page
+- `GET /docs/page/diff?url=...&from_version=1&to_version=2` returns a unified diff between revisions
+- `GET /docs/changes` returns new, changed, and deleted pages for the latest or a named run
+- MCP now exposes `get_page_history`, `get_page_diff`, and `get_recent_changes`
+
+## Phase 4 Unattended Operation
+
+Phase 4 hardens the refresh path for cron, systemd, or container timers.
+
+- `scripts/run_refresh.py` now supports:
+  - `--trigger`
+  - `--lock-path`
+  - `--lock-timeout-s`
+  - `--log-path`
+- only one refresh per source runs at a time; concurrent runs fail fast with a lock error
+- stale locks are recovered automatically after the configured timeout
+- refresh runs append JSONL events to `data/logs/refresh_runs.jsonl` by default
+- CLI exit codes are stable for automation:
+  - `0` success
+  - `3` lock conflict / skipped because another refresh is active
+  - `1` failure
 
 ## Grounded Answers
 

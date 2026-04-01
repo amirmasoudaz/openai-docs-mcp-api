@@ -33,10 +33,12 @@ async def api_ingest_cached(request: IngestRequest):
             pages_new=result.pages_new,
             pages_changed=result.pages_changed,
             pages_deleted=result.pages_deleted,
+            pages_failed=result.pages_failed,
             chunks_written=result.chunks_written,
             summaries_invalidated=result.summaries_invalidated,
             page_embeddings_invalidated=result.page_embeddings_invalidated,
             chunk_embeddings_invalidated=result.chunk_embeddings_invalidated,
+            exports_invalidated=result.exports_invalidated,
         )
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))

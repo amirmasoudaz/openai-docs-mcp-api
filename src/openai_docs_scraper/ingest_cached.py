@@ -58,6 +58,7 @@ def ingest_cached_pages(
     *,
     con,
     raw_dir: str | Path,
+    run_id: str | None = None,
     max_pages: int | None = None,
     mark_missing_deleted: bool = True,
     force: bool = False,
@@ -66,7 +67,7 @@ def ingest_cached_pages(
     chunk_max_chars: int = 2500,
     chunk_overlap_chars: int = 200,
 ) -> dict[str, int]:
-    run_id = _utc_now_iso()
+    run_id = run_id or _utc_now_iso()
     stats = {
         "pages_seen": 0,
         "pages_ingested": 0,
@@ -74,10 +75,12 @@ def ingest_cached_pages(
         "pages_new": 0,
         "pages_changed": 0,
         "pages_deleted": 0,
+        "pages_failed": 0,
         "chunks_written": 0,
         "summaries_invalidated": 0,
         "page_embeddings_invalidated": 0,
         "chunk_embeddings_invalidated": 0,
+        "exports_invalidated": 0,
     }
 
     for page in iter_cached_pages(raw_dir):
@@ -118,7 +121,7 @@ def ingest_cached_pages(
         existing = con.execute(
             """
             SELECT id, content_hash, content_version, changed_at, summary_for_hash,
-                   embedding_for_hash, deleted_at
+                   embedding_for_hash, export_for_hash, deleted_at
             FROM pages
             WHERE url = ?;
             """,
@@ -135,6 +138,7 @@ def ingest_cached_pages(
                     scraped_at = ?,
                     last_seen_at = ?,
                     last_seen_run_id = ?,
+                    page_state = ?,
                     deleted_at = NULL,
                     deletion_reason = NULL,
                     error = ?
@@ -148,12 +152,15 @@ def ingest_cached_pages(
                     page.scraped_at or run_id,
                     run_id,
                     run_id,
+                    "failed" if error else "unchanged",
                     error,
                     existing["id"],
                 ),
             )
             con.commit()
             stats["pages_unchanged"] += 1
+            if error:
+                stats["pages_failed"] += 1
             continue
 
         previous_chunk_stats = {"total": 0, "embedded": 0}
@@ -181,6 +188,8 @@ def ingest_cached_pages(
                 stats["summaries_invalidated"] += 1
             if existing["embedding_for_hash"]:
                 stats["page_embeddings_invalidated"] += 1
+            if existing["export_for_hash"]:
+                stats["exports_invalidated"] += 1
             stats["chunk_embeddings_invalidated"] += int(previous_chunk_stats["embedded"] or 0)
 
         page_id = upsert_page(
@@ -201,6 +210,7 @@ def ingest_cached_pages(
             error=error,
             content_version=content_version,
             changed_at=changed_at,
+            page_state="failed" if error else ("changed" if content_changed else ("new" if not existing else "unchanged")),
             last_seen_at=run_id,
             last_seen_run_id=run_id,
             deleted_at=None,
@@ -215,6 +225,7 @@ def ingest_cached_pages(
                 content_version=content_version,
                 content_hash=content_hash,
                 title=extracted.title,
+                plain_text=extracted.plain_text,
                 observed_at=run_id,
                 source_hash=page.source_hash,
             )
@@ -226,11 +237,13 @@ def ingest_cached_pages(
                 content_version=content_version,
                 content_hash=content_hash,
                 title=extracted.title,
+                plain_text=extracted.plain_text,
                 observed_at=run_id,
                 source_hash=page.source_hash,
             )
 
         if error:
+            stats["pages_failed"] += 1
             stats["pages_ingested"] += 1
             continue
 
@@ -284,6 +297,7 @@ def ingest_cached_pages(
                 f"""
                 UPDATE pages
                 SET deleted_at = ?,
+                    page_state = 'deleted',
                     deletion_reason = 'missing_from_raw_dir'
                 WHERE id IN ({placeholders});
                 """,

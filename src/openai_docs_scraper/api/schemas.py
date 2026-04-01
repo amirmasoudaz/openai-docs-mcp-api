@@ -125,10 +125,12 @@ class IngestResponse(BaseModel):
     pages_new: int = 0
     pages_changed: int = 0
     pages_deleted: int = 0
+    pages_failed: int = 0
     chunks_written: int
     summaries_invalidated: int = 0
     page_embeddings_invalidated: int = 0
     chunk_embeddings_invalidated: int = 0
+    exports_invalidated: int = 0
 
 
 # === Summarize Schemas ===
@@ -321,6 +323,65 @@ class DocsCatalogResponse(BaseModel):
     entries: list[CatalogEntry]
 
 
+class PageRevisionResponse(BaseModel):
+    """One recorded content revision for a page."""
+
+    content_version: int
+    content_hash: Optional[str] = None
+    observed_at: str
+    title: Optional[str] = None
+    section: Optional[str] = None
+    source_hash: Optional[str] = None
+
+
+class PageHistoryResponse(BaseModel):
+    """Revision history for a page."""
+
+    url: str
+    title: Optional[str] = None
+    section: Optional[str] = None
+    current_content_version: Optional[int] = None
+    page_state: Optional[str] = None
+    changed_at: Optional[str] = None
+    deleted_at: Optional[str] = None
+    revisions: list[PageRevisionResponse]
+
+
+class PageDiffResponse(BaseModel):
+    """Unified diff between two page revisions."""
+
+    url: str
+    from_version: int
+    to_version: int
+    from_observed_at: Optional[str] = None
+    to_observed_at: Optional[str] = None
+    diff: str
+
+
+class ChangeEntryResponse(BaseModel):
+    """One page change entry from a run report."""
+
+    url: str
+    title: Optional[str] = None
+    section: Optional[str] = None
+    content_version: Optional[int] = None
+    observed_at: Optional[str] = None
+    md_relpath: str
+
+
+class RunChangesResponse(BaseModel):
+    """Run-level summary of new, changed, and deleted pages."""
+
+    run_id: str
+    run_status: Optional[str] = None
+    run_stage: Optional[str] = None
+    started_at: Optional[str] = None
+    finished_at: Optional[str] = None
+    new_pages: list[ChangeEntryResponse]
+    changed_pages: list[ChangeEntryResponse]
+    deleted_pages: list[ChangeEntryResponse]
+
+
 class DocsStatsResponse(BaseModel):
     """Database and export directory stats."""
 
@@ -332,6 +393,7 @@ class DocsStatsResponse(BaseModel):
     sitemap_exists: bool
     pages_total: int
     pages_deleted: int
+    pages_failed: int = 0
     pages_with_plain_text: int
     pages_with_summary: int
     pages_with_page_embedding: int
@@ -339,9 +401,20 @@ class DocsStatsResponse(BaseModel):
     chunks_with_embedding: int
     stale_summaries: int
     stale_page_embeddings: int
+    stale_exports: int = 0
     newest_last_seen_at: Optional[str] = None
     oldest_last_seen_at: Optional[str] = None
     latest_run_id: Optional[str] = None
+    latest_run_status: Optional[str] = None
+    latest_run_stage: Optional[str] = None
+    latest_run_started_at: Optional[str] = None
+    latest_run_finished_at: Optional[str] = None
+    latest_run_error_summary: Optional[str] = None
+    latest_successful_run_id: Optional[str] = None
+    active_snapshot_id: Optional[str] = None
+    active_snapshot_published_at: Optional[str] = None
+    active_snapshot_pages_total: int = 0
+    active_snapshot_chunks_total: int = 0
     md_export_root: str
     md_export_root_exists: bool
     index_md_exists: bool

@@ -98,6 +98,7 @@ def run_scrape(
                 error=page.error,
                 content_version=1,
                 changed_at=page.scraped_at,
+                page_state="failed" if page.error else None,
                 last_seen_at=None,
                 last_seen_run_id=None,
                 deleted_at=None,

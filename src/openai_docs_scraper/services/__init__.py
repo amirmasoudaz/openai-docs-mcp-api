@@ -11,6 +11,15 @@ from .summarizer import summarize_pages, SummarizeResult
 from .embedder import embed_pages, embed_chunks, EmbedResult
 from .search import query, SearchHit
 from .answering import answer_question, AnswerCitation, AnswerFreshness, AnswerResult
+from .history import (
+    get_page_history,
+    diff_page_versions,
+    get_run_changes,
+    PageHistoryResult,
+    PageDiffResult,
+    RunChangeReport,
+)
+from .refresh import run_refresh, RefreshLockedError, RefreshResult
 
 __all__ = [
     "Settings",
@@ -33,6 +42,15 @@ __all__ = [
     "AnswerCitation",
     "AnswerFreshness",
     "AnswerResult",
+    "get_page_history",
+    "diff_page_versions",
+    "get_run_changes",
+    "PageHistoryResult",
+    "PageDiffResult",
+    "RunChangeReport",
+    "run_refresh",
+    "RefreshLockedError",
+    "RefreshResult",
 ]
 
 

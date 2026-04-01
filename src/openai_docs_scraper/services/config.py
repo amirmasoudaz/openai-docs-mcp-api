@@ -57,6 +57,17 @@ class Settings(BaseSettings):
     # Search defaults
     search_k: int = 10
 
+    # Refresh scheduling defaults
+    refresh_discovery_interval_minutes: int = 30
+    refresh_targeted_interval_hours: int = 4
+    refresh_reconcile_interval_hours: int = 24
+    refresh_integrity_interval_days: int = 7
+
+    # Refresh operation defaults
+    refresh_lock_dir: Path = Path("data/locks")
+    refresh_lock_timeout_s: int = 7200
+    refresh_log_path: Path = Path("data/logs/refresh_runs.jsonl")
+
 
 @lru_cache
 def get_settings() -> Settings:

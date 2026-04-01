@@ -177,11 +177,35 @@ PYTHONPATH=src python scripts/rebuild_split_markdown.py --openai-index
 
 ### Refresh after new scrapes
 
-1. Ingest new/overwritten JSON:
+1. Publish a tracked refresh run when the current `raw_dir` snapshot is ready:
+   - `run_refresh.py --no-fetch-sitemap` if the local sitemap is already current.
+   - `run_refresh.py` to fetch a fresh sitemap first and then publish a new SQLite snapshot on success.
+2. Ingest new/overwritten JSON manually when you want lower-level control:
    - `run_ingest.py --full-refresh` when `raw_dir` is the authoritative snapshot and missing pages should be marked deleted.
    - `run_ingest.py --incremental` when `raw_dir` is partial and missing pages should remain active.
-2. Re-run **`run_summarize.py`** for pages missing summaries (**`--force`** to redo all).
-3. Re-run **`run_embed.py`** with **`--force`** if text/summary changed so vectors stay aligned.
+3. Re-run **`run_summarize.py`** for pages missing summaries (**`--force`** to redo all).
+4. Re-run **`run_embed.py`** with **`--force`** if text/summary changed so vectors stay aligned.
+
+### Refresh publication behavior
+
+- `run_refresh.py` records a source-level run and publishes a new snapshot only if ingestion succeeds.
+- `/health`, `/config`, and `/docs/stats` expose the latest run, latest successful run, and active snapshot metadata.
+- If a refresh fails, API search and grounded answers continue using the previously published SQLite snapshot.
+- Refresh locking prevents overlapping runs for the same source on one machine.
+- Refresh logs append JSON lines to the configured log file so unattended runs are inspectable after the fact.
+
+### Change and artifact state
+
+- Pages now keep an explicit `page_state` from the latest ingest cycle: `new`, `unchanged`, `changed`, `deleted`, or `failed`.
+- Summaries, page embeddings, chunk embeddings, and split-markdown exports all have freshness signals tied to the current `content_hash`.
+- `/docs/stats` surfaces `pages_failed`, `stale_summaries`, `stale_page_embeddings`, and `stale_exports` so you can see which downstream artifacts need follow-up work.
+
+### Change ledger and diffs
+
+- `GET /docs/page/history?url=...` returns the recorded revision list for a page.
+- `GET /docs/page/diff?url=...&from_version=...&to_version=...` returns a unified diff based on stored normalized page text.
+- `GET /docs/changes?run_id=...` returns new, changed, and deleted pages for a run.
+- MCP exposes the same inspection flow through `get_page_history`, `get_page_diff`, and `get_recent_changes`.
 
 ### Refresh split Markdown only
 
@@ -194,6 +218,63 @@ PYTHONPATH=src python scripts/rebuild_split_markdown.py --openai-index
 ### When OpenAI docs change a lot
 
 Prefer a **full pass**: scrape/update **`raw_data`** → **`run_ingest --force`** → summarize → embed → rebuild split export.
+
+### Unattended scheduling
+
+Recommended local cadence:
+
+- sitemap/index discovery: every 15 to 30 minutes
+- targeted refresh: every 1 to 4 hours
+- full reconciliation: daily
+- integrity/eval sweep: weekly
+
+Recommended command:
+
+```bash
+python scripts/run_refresh.py \
+  --trigger scheduled \
+  --no-fetch-sitemap \
+  --lock-timeout-s 7200
+```
+
+Exit codes:
+
+- `0` refresh succeeded
+- `3` another refresh already holds the lock
+- `1` refresh failed
+
+Example cron entry:
+
+```cron
+0 */4 * * * cd /path/to/llm-provider-docs-ledger && ./.venv/bin/python scripts/run_refresh.py --trigger cron --no-fetch-sitemap >> data/logs/cron_refresh.out 2>&1
+```
+
+Example `systemd` service:
+
+```ini
+[Unit]
+Description=LLM Provider Docs Ledger refresh
+
+[Service]
+Type=oneshot
+WorkingDirectory=/path/to/llm-provider-docs-ledger
+ExecStart=/path/to/llm-provider-docs-ledger/.venv/bin/python scripts/run_refresh.py --trigger systemd --no-fetch-sitemap
+```
+
+Example `systemd` timer:
+
+```ini
+[Unit]
+Description=Run llm-provider-docs-ledger refresh every 4 hours
+
+[Timer]
+OnBootSec=10m
+OnUnitActiveSec=4h
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
 
 ---
 

@@ -14,14 +14,15 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 import anyio
 
 from openai_docs_scraper.api.main import app_config, health_check
+from openai_docs_scraper.api.routes.docs import get_changes as api_get_changes
 from openai_docs_scraper.api.routes.docs import get_stats as api_docs_stats
 from openai_docs_scraper.api.routes.search import api_answer_post, api_search_post
 from openai_docs_scraper.api.schemas import AnswerRequest, SearchRequest
-from openai_docs_scraper.db import connect, init_db
-from openai_docs_scraper.ingest_cached import ingest_cached_pages
 from openai_docs_scraper.mcp_server import answer_question as mcp_answer_question
+from openai_docs_scraper.mcp_server import get_recent_changes as mcp_get_recent_changes
 from openai_docs_scraper.mcp_server import get_stats as mcp_get_stats
 from openai_docs_scraper.mcp_server import search_docs as mcp_search_docs
+from openai_docs_scraper.services import run_refresh
 from openai_docs_scraper.services.config import get_settings
 from openai_docs_scraper.services.state import collect_artifact_state
 
@@ -78,18 +79,21 @@ def main() -> None:
             ),
         )
 
-        con = connect(db_path)
-        init_db(con)
-        ingest_cached_pages(con=con, raw_dir=raw_dir, force=False)
-        con.close()
-
         os.environ["DB_PATH"] = str(db_path)
         os.environ["RAW_DIR"] = str(raw_dir)
         os.environ["MD_EXPORT_ROOT"] = str(export_root)
         os.environ["SITEMAP_PATH"] = str(sitemap_path)
         get_settings.cache_clear()
+        run_refresh(
+            db_path=db_path,
+            raw_dir=raw_dir,
+            sitemap_path=sitemap_path,
+            fetch_latest_sitemap=False,
+        )
         state = collect_artifact_state(get_settings())
         print(f"gate: direct state pages_total={state.pages_total}")
+        assert state.active_snapshot_id is not None
+        assert state.latest_run_status == "succeeded"
 
         print("gate: api health")
         health = anyio.run(health_check)
@@ -113,6 +117,10 @@ def main() -> None:
         docs_stats = anyio.run(api_docs_stats)
         assert docs_stats.pages_total == 1
 
+        print("gate: docs changes")
+        changes = anyio.run(api_get_changes, None, 10)
+        assert changes.new_pages
+
         print("gate: api config")
         config = anyio.run(app_config)
         assert config["source_name"] == "openai_docs"
@@ -120,6 +128,10 @@ def main() -> None:
         print("gate: mcp stats")
         mcp_stats = json.loads(mcp_get_stats())
         assert mcp_stats["pages_total"] == 1
+
+        print("gate: mcp changes")
+        mcp_changes = json.loads(mcp_get_recent_changes(limit=10))
+        assert mcp_changes["new_pages"]
 
         print("gate: mcp search")
         mcp_search = json.loads(mcp_search_docs(query="function calling", k=3, target="chunks", no_embed=True))

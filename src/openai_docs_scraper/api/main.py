@@ -61,6 +61,18 @@ async def app_config():
         "embedding_model": s.embedding_model,
         "summary_model": s.summary_model,
         "answer_model": s.answer_model,
+        "refresh_discovery_interval_minutes": s.refresh_discovery_interval_minutes,
+        "refresh_targeted_interval_hours": s.refresh_targeted_interval_hours,
+        "refresh_reconcile_interval_hours": s.refresh_reconcile_interval_hours,
+        "refresh_integrity_interval_days": s.refresh_integrity_interval_days,
+        "refresh_lock_dir": str(s.refresh_lock_dir.expanduser().resolve()),
+        "refresh_lock_timeout_s": s.refresh_lock_timeout_s,
+        "refresh_log_path": str(s.refresh_log_path.expanduser().resolve()),
+        "latest_run_id": state.latest_run_id,
+        "latest_run_status": state.latest_run_status,
+        "latest_successful_run_id": state.latest_successful_run_id,
+        "active_snapshot_id": state.active_snapshot_id,
+        "active_snapshot_published_at": state.active_snapshot_published_at,
     }
 
 

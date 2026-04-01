@@ -7,6 +7,9 @@ Tools exposed:
   answer_question      - grounded answer with exact local citations and freshness metadata
   get_doc_file         - read a split .md file (e.g. guides/structured-outputs.md)
   get_page_by_url      - look up a page by its OpenAI docs URL, return content
+  get_page_history     - show revision history for a page URL
+  get_page_diff        - show a unified diff between two page revisions
+  get_recent_changes   - show new / changed / deleted pages from the latest or named run
   get_navigation_index - full index.md (TOC with blurbs for every page)
   get_catalog          - list all pages (url, title, summary, paths)
   get_stats            - DB / export directory stats
@@ -44,7 +47,8 @@ mcp = FastMCP(
         "documentation. Always prefer `search_docs` for open-ended questions, then "
         "fetch the full file with `get_doc_file` using the returned `md_relpath`. "
         "Use `answer_question` when you need a citation-first answer grounded in the local snapshot. "
-        "Use `get_navigation_index` to orient yourself across all sections."
+        "Use `get_navigation_index` to orient yourself across all sections. "
+        "Use `get_recent_changes`, `get_page_history`, and `get_page_diff` to inspect how docs changed over time."
     ),
     host=_mcp_host,
     port=_mcp_port,
@@ -274,6 +278,80 @@ def get_page_by_url(url: str) -> str:
         )
     except ValueError as e:
         return f"ERROR: {e}"
+
+
+@mcp.tool()
+def get_page_history(url: str) -> str:
+    """Return recorded revision history for one documentation page URL."""
+    from .services.history import get_page_history as _get_page_history
+
+    try:
+        result = _get_page_history(_db_path(), url=url)
+    except ValueError as e:
+        return f"ERROR: {e}"
+    payload = {
+        "url": result.url,
+        "title": result.title,
+        "section": result.section,
+        "current_content_version": result.current_content_version,
+        "page_state": result.page_state,
+        "changed_at": result.changed_at,
+        "deleted_at": result.deleted_at,
+        "revisions": [
+            {
+                "content_version": revision.content_version,
+                "content_hash": revision.content_hash,
+                "observed_at": revision.observed_at,
+                "title": revision.title,
+                "section": revision.section,
+                "source_hash": revision.source_hash,
+            }
+            for revision in result.revisions
+        ],
+    }
+    return json.dumps(payload, ensure_ascii=False, indent=2)
+
+
+@mcp.tool()
+def get_page_diff(url: str, from_version: int | None = None, to_version: int | None = None) -> str:
+    """Return a unified diff between two revisions of one page URL."""
+    from .services.history import diff_page_versions as _diff_page_versions
+
+    try:
+        result = _diff_page_versions(_db_path(), url=url, from_version=from_version, to_version=to_version)
+    except ValueError as e:
+        return f"ERROR: {e}"
+    payload = {
+        "url": result.url,
+        "from_version": result.from_version,
+        "to_version": result.to_version,
+        "from_observed_at": result.from_observed_at,
+        "to_observed_at": result.to_observed_at,
+        "diff": result.diff,
+    }
+    return json.dumps(payload, ensure_ascii=False, indent=2)
+
+
+@mcp.tool()
+def get_recent_changes(run_id: Optional[str] = None, limit: int = 50) -> str:
+    """Return new, changed, and deleted pages for the latest or a specific run."""
+    from .services.history import get_run_changes as _get_run_changes
+
+    try:
+        report = _get_run_changes(_db_path(), run_id=run_id, limit=limit)
+    except ValueError as e:
+        return f"ERROR: {e}"
+    payload = {
+        "run_id": report.run_id,
+        "run_status": report.run_status,
+        "run_stage": report.run_stage,
+        "started_at": report.started_at,
+        "finished_at": report.finished_at,
+        "new_pages": [entry.__dict__ for entry in report.new_pages],
+        "changed_pages": [entry.__dict__ for entry in report.changed_pages],
+        "deleted_pages": [entry.__dict__ for entry in report.deleted_pages],
+    }
+    return json.dumps(payload, ensure_ascii=False, indent=2)
 
 
 @mcp.tool()

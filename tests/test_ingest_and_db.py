@@ -3,10 +3,13 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from openai_docs_scraper.book_export import export_book_bundle
 from openai_docs_scraper.db import connect, init_db, replace_chunks, upsert_page
 from openai_docs_scraper.embeddings import pack_f32
 from openai_docs_scraper.ingest_cached import ingest_cached_pages
+from openai_docs_scraper.services.config import Settings
 from openai_docs_scraper.services.search import query
+from openai_docs_scraper.services.state import collect_artifact_state
 
 
 def _write_cached_page(raw_dir: Path, name: str, *, url: str, title: str, raw_html: str) -> None:
@@ -27,6 +30,14 @@ def _make_html(title: str, paragraphs: list[str]) -> str:
     )
     body = "".join(f"<p>{paragraph}{filler}</p>" for paragraph in paragraphs)
     return f"<html><body><main><article><h1>{title}</h1>{body}</article></main></body></html>"
+
+
+def _write_sitemap(path: Path, urls: list[str]) -> None:
+    items = "".join(f"<url><loc>{url}</loc></url>" for url in urls)
+    path.write_text(
+        f"<urlset xmlns='http://www.sitemaps.org/schemas/sitemap/0.9'>{items}</urlset>",
+        encoding="utf-8",
+    )
 
 
 def test_ingest_skips_unchanged_pages(tmp_path: Path) -> None:
@@ -125,6 +136,7 @@ def test_chunks_fts_triggers_follow_insert_update_and_delete(tmp_path: Path) -> 
         error=None,
         content_version=1,
         changed_at="2026-03-30T00:00:00+00:00",
+        page_state="new",
         last_seen_at="2026-03-30T00:00:00+00:00",
         last_seen_run_id="run-1",
         deleted_at=None,
@@ -412,3 +424,75 @@ def test_incremental_ingest_keeps_missing_pages_active(tmp_path: Path) -> None:
     assert second["pages_deleted"] == 0
     assert removed_page["deleted_at"] is None
     assert any(hit.url == removed_url for hit in hits)
+
+
+def test_export_bundle_marks_pages_fresh_and_later_content_changes_make_exports_stale(tmp_path: Path) -> None:
+    raw_dir = tmp_path / "raw"
+    raw_dir.mkdir()
+    db_path = tmp_path / "docs.sqlite3"
+    export_root = tmp_path / "export"
+    sitemap_path = tmp_path / "sitemap.xml"
+    page_url = "https://platform.openai.com/docs/guides/function-calling"
+
+    _write_cached_page(
+        raw_dir,
+        "function-calling",
+        url=page_url,
+        title="Function Calling",
+        raw_html=_make_html(
+            "Function Calling",
+            [
+                "Function calling lets models decide when to call tools.",
+                "This page explains schemas, tool arguments, and the execution loop.",
+                "The fixture is intentionally verbose enough to pass ingest validation.",
+                "One more paragraph keeps the page long enough to avoid blocked-or-too-short classification.",
+            ],
+        ),
+    )
+    _write_sitemap(sitemap_path, [page_url])
+
+    con = connect(db_path)
+    init_db(con)
+    first = ingest_cached_pages(con=con, raw_dir=raw_dir, force=False)
+    assert first["pages_new"] == 1
+    con.close()
+
+    export_book_bundle(db_path=db_path, sitemap_path=sitemap_path, out_dir=export_root, raw_dir=raw_dir)
+    state_after_export = collect_artifact_state(
+        Settings(db_path=db_path, raw_dir=raw_dir, sitemap_path=sitemap_path, md_export_root=export_root)
+    )
+    assert state_after_export.stale_exports == 0
+
+    _write_cached_page(
+        raw_dir,
+        "function-calling",
+        url=page_url,
+        title="Function Calling",
+        raw_html=_make_html(
+            "Function Calling",
+            [
+                "Function calling lets models decide when to call tools and validate tool arguments.",
+                "This updated page explains schemas, execution loops, retries, and result handling.",
+                "The fixture changed enough to require export regeneration.",
+                "One more paragraph keeps the page long enough to avoid blocked-or-too-short classification.",
+            ],
+        ),
+    )
+
+    con = connect(db_path)
+    second = ingest_cached_pages(con=con, raw_dir=raw_dir, force=False)
+    page_row = con.execute(
+        "SELECT page_state, export_for_hash, content_hash FROM pages WHERE url = ?;",
+        (page_url,),
+    ).fetchone()
+    con.close()
+
+    state_after_change = collect_artifact_state(
+        Settings(db_path=db_path, raw_dir=raw_dir, sitemap_path=sitemap_path, md_export_root=export_root)
+    )
+
+    assert second["pages_changed"] == 1
+    assert second["exports_invalidated"] == 1
+    assert page_row["page_state"] == "changed"
+    assert page_row["export_for_hash"] != page_row["content_hash"]
+    assert state_after_change.stale_exports == 1
